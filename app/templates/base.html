@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ settings.app_name if settings is defined else "Flower Forecast" }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=4">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">Flower Forecast</a>
+      <span class="muted">MVP: прогноз закупки цветов</span>
+      <nav class="topnav">
+        <a href="/analytics">Аналитика</a>
+        <a href="/backtest">Проверка на истории</a>
+      </nav>
+    </header>
+    <main class="page">
+      {% block content %}{% endblock %}
+    </main>
+    <div class="loading-overlay" data-loading-overlay hidden>
+      <div class="loading-box" role="status" aria-live="polite">
+        <div class="spinner" aria-hidden="true"></div>
+        <strong>Идет расчет</strong>
+        <p data-loading-text>Ожидайте, система считает рекомендацию.</p>
+      </div>
+    </div>
+    <script>
+      document.querySelectorAll("form[data-loading-message]").forEach((form) => {
+        form.addEventListener("submit", () => {
+          const overlay = document.querySelector("[data-loading-overlay]");
+          const text = document.querySelector("[data-loading-text]");
+          if (text) {
+            text.textContent = form.dataset.loadingMessage || "Ожидайте, идет обработка.";
+          }
+          form.querySelectorAll("button").forEach((button) => {
+            button.disabled = true;
+          });
+          if (overlay) {
+            overlay.hidden = false;
+            document.body.classList.add("is-loading");
+          }
+        });
+      });
+    </script>
+  </body>
+</html>

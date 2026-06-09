@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero compact">
+  <div>
+    <h1>Расчет #{{ run.id }}</h1>
+    <p>{{ run.category }} за {{ run.target_start_date.strftime("%d.%m.%Y") }} - {{ run.target_end_date.strftime("%d.%m.%Y") }}</p>
+  </div>
+  <a class="button" href="/">Новый расчет</a>
+</section>
+
+<section class="panel wide">
+  <h2>Общая рекомендация</h2>
+  <article class="recommendation-card summary-card">
+    <div class="recommendation-main">
+      <div>
+        <span class="eyebrow">{{ recommendation_summary.label }}</span>
+        <strong>{{ "%.0f"|format(recommendation_summary.final_quantity) }} шт.</strong>
+        <span>общий рекомендуемый заказ</span>
+      </div>
+      <div class="recommendation-numbers">
+        <span>Без праздников: <b>{{ "%.0f"|format(recommendation_summary.statistical_quantity) }}</b></span>
+        {% if has_event_recommendation %}
+          <span>С праздниками: <b>{{ "%.0f"|format(recommendation_summary.ai_quantity) }}</b></span>
+        {% endif %}
+        <span>Позиций: <b>{{ recommendation_summary.items_count }}</b></span>
+      </div>
+    </div>
+    <dl class="detail-grid">
+      <div><dt>Ожидаемый спрос</dt><dd>{{ "%.0f"|format(recommendation_summary.baseline_demand) }}</dd></div>
+      <div><dt>Страховой запас</dt><dd>{{ "%.0f"|format(recommendation_summary.safety_stock) }}</dd></div>
+      <div><dt>Остаток на дату расчета</dt><dd>{{ "%.0f"|format(recommendation_summary.current_stock) }}</dd></div>
+      <div><dt>Свежий остаток к вычету</dt><dd>{{ "%.0f"|format(recommendation_summary.usable_stock) }}</dd></div>
+      <div><dt>Уже заказано к поставке</dt><dd>{{ "%.0f"|format(recommendation_summary.incoming_orders) }}</dd></div>
+    </dl>
+  </article>
+</section>
+
+<section class="panel wide">
+  <h2>Детализация по номенклатурам</h2>
+  <div class="recommendation-list">
+    {% for item in run.items %}
+    <article class="recommendation-card {% if item.historical_sold == 0 %}warning{% endif %}">
+      <div class="recommendation-main">
+        <div>
+          <span class="eyebrow">{{ item.product.purchase_name }}</span>
+          <strong>{{ "%.0f"|format(item.final_quantity) }} шт.</strong>
+          <span>рекомендуемый заказ</span>
+        </div>
+        <div class="recommendation-numbers">
+          <span>Без праздников: <b>{{ "%.0f"|format(item.statistical_quantity) }}</b></span>
+          {% if has_event_recommendation %}
+            <span>С праздниками: <b>{{ "%.0f"|format(item.ai_quantity or item.statistical_quantity) }}</b></span>
+          {% else %}
+            <span>AI: <b>{{ "%.0f"|format(item.ai_quantity or item.statistical_quantity) }}</b></span>
+          {% endif %}
+          <span>Тренд: <b>{{ "%.2f"|format(item.trend_coefficient) }}</b></span>
+        </div>
+      </div>
+      {% if item.historical_sold == 0 %}
+      <div class="inline-warning">
+        Нет продаж за аналогичный период прошлого года. Это не рабочая рекомендация, а сигнал, что нужно загрузить историю или выбрать период с данными.
+      </div>
+      {% endif %}
+      <p>{{ item.explanation }}</p>
+      <dl class="detail-grid">
+        <div><dt>Продано год назад</dt><dd>{{ "%.0f"|format(item.historical_sold) }}</dd></div>
+        <div><dt>Закуплено год назад</dt><dd>{{ "%.0f"|format(item.historical_purchased) }}</dd></div>
+        <div><dt>Осталось год назад</dt><dd>{{ "%.0f"|format(item.historical_leftover) }}</dd></div>
+        <div><dt>Ожидаемый спрос</dt><dd>{{ "%.0f"|format(item.baseline_demand) }}</dd></div>
+        <div><dt>Страховой запас</dt><dd>{{ "%.0f"|format(item.safety_stock) }}</dd></div>
+        <div>
+          <dt>Тренд этого года</dt>
+          <dd>{{ "%.0f"|format(item.trend_current_sales) }}</dd>
+          <small>{{ item.trend_current_start.strftime("%d.%m.%Y") if item.trend_current_start else "нет" }} - {{ item.trend_current_end.strftime("%d.%m.%Y") if item.trend_current_end else "нет" }}</small>
+        </div>
+        <div>
+          <dt>Тренд прошлого года</dt>
+          <dd>{{ "%.0f"|format(item.trend_previous_sales) }}</dd>
+          <small>{{ item.trend_previous_start.strftime("%d.%m.%Y") if item.trend_previous_start else "нет" }} - {{ item.trend_previous_end.strftime("%d.%m.%Y") if item.trend_previous_end else "нет" }}</small>
+        </div>
+        <div><dt>Остаток на дату расчета</dt><dd>{{ "%.0f"|format(item.current_stock) }}</dd></div>
+        <div><dt>Свежий остаток к вычету</dt><dd>{{ "%.0f"|format(item.usable_stock) }}</dd></div>
+        <div><dt>Дата остатка</dt><dd>{{ item.stock_snapshot_date.strftime("%d.%m.%Y") if item.stock_snapshot_date else "нет" }}</dd></div>
+        <div><dt>Уже заказано к поставке</dt><dd>{{ "%.0f"|format(item.incoming_orders) }}</dd></div>
+        <div>
+          <dt>Ожидаемый следующий приход</dt>
+          <dd>{{ item.expected_next_receipt_date.strftime("%d.%m.%Y") if item.expected_next_receipt_date else "нет" }}</dd>
+          <small>{{ item.expected_next_receipt_note or "" }}</small>
+        </div>
+      </dl>
+      <p class="footnote">
+        * Тренд = продажи за последние недели перед расчетным периодом в этом году /
+        средневзвешенные продажи за такие же периоды прошлых лет. В этом расчете:
+        {{ "%.0f"|format(item.trend_current_sales) }} шт.
+        за {{ item.trend_current_start.strftime("%d.%m.%Y") if item.trend_current_start else "нет" }} -
+        {{ item.trend_current_end.strftime("%d.%m.%Y") if item.trend_current_end else "нет" }}
+        / {{ "%.0f"|format(item.trend_previous_sales) }} шт. по прошлым годам
+        = {{ "%.2f"|format(item.trend_coefficient) }}.
+      </p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel wide">
+  <h2>Сравнение с реальными закупками</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Позиция</th>
+          <th>Рекомендация</th>
+          <th>Факт закупки</th>
+          <th>Ошибка</th>
+          <th>APE</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in metrics %}
+        <tr>
+          <td>{{ row.product }}</td>
+          <td>{{ "%.0f"|format(row.recommended) }}</td>
+          <td>{{ "%.0f"|format(row.actual) }}</td>
+          <td>{{ "%.0f"|format(row.error) }}</td>
+          <td>
+            {% if row.absolute_percentage_error is not none %}
+              {{ "%.1f"|format(row.absolute_percentage_error) }}%
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="panel-note">
+    APE считается только там, где есть фактическая закупка. Если факт закупки равен нулю,
+    процентную ошибку считать нельзя, поэтому показывается прочерк.
+  </p>
+</section>
+
+{% if run.notes %}
+<section class="panel wide muted-panel">
+  <details>
+    <summary>AI-заметки</summary>
+    <pre>{{ run.notes }}</pre>
+  </details>
+</section>
+{% endif %}
+{% endblock %}

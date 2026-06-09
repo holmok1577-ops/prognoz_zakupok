@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <h1>Прогноз закупки</h1>
+    <p>Загрузите данные из 1С автоматически или CSV-файлами, затем сформируйте рекомендацию для категории {{ settings.mvp_product_category }}.</p>
+  </div>
+  <div class="stats">
+    <div><strong>{{ products_count }}</strong><span>позиций</span></div>
+    <div><strong>{{ "%.0f"|format(sales_quantity) }}</strong><span>продано шт.</span><small>{{ sales_count }} записей</small></div>
+    <div>
+      <strong>{{ "%.0f"|format(stocks_quantity) }}</strong>
+      <span>на остатке шт.</span>
+      <small>
+        {% if latest_stock_date %}
+          на {{ latest_stock_date.strftime("%d.%m.%Y") }}, {{ stocks_snapshot_count }} строк
+        {% else %}
+          снимков нет
+        {% endif %}
+      </small>
+    </div>
+    <div><strong>{{ "%.0f"|format(purchases_quantity) }}</strong><span>закуплено шт.</span><small>{{ purchases_count }} записей</small></div>
+  </div>
+</section>
+
+{% if sync_message %}
+<section class="notice {{ sync_status }}">
+  {{ sync_message }}
+</section>
+{% endif %}
+
+{% if import_message %}
+<section class="notice {{ import_status }}">
+  {{ import_message }}
+</section>
+{% endif %}
+
+<section class="grid">
+  <div class="panel">
+    <h2>Автовыгрузка из 1С</h2>
+    <p class="panel-note">Кнопка забирает данные по HTTP/OData-адресам из `.env`: номенклатуру, продажи, остатки и реальные закупки.</p>
+    <form class="single-action" action="/sync/onec" method="post">
+      <button class="primary">Загрузить из 1С</button>
+    </form>
+    <div class="config-list">
+      <span>Тип: {{ settings.onec_connection_type }}</span>
+      <span>База: {{ settings.onec_base_url or "не задана" }}</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Импорт XLS из 1С</h2>
+    <form action="/import/onec-xls/products" method="post" enctype="multipart/form-data">
+      <label>Номенклатура XLS</label>
+      <input type="file" name="file" accept=".xls,.xlsx" required>
+      <button>Загрузить</button>
+    </form>
+    <form action="/import/onec-xls/sales" method="post" enctype="multipart/form-data">
+      <label>Продажи XLS</label>
+      <input type="file" name="file" accept=".xls,.xlsx" required>
+      <button>Загрузить</button>
+    </form>
+    <form action="/import/onec-xls/stocks" method="post" enctype="multipart/form-data">
+      <label>Остатки XLS</label>
+      <input type="file" name="file" accept=".xls,.xlsx" required>
+      <button>Загрузить</button>
+    </form>
+    <form action="/import/onec-xls/purchases" method="post" enctype="multipart/form-data">
+      <label>Поступления XLS</label>
+      <input type="file" name="file" accept=".xls,.xlsx" required>
+      <button>Загрузить</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Импорт CSV</h2>
+    <form action="/import/products" method="post" enctype="multipart/form-data">
+      <label>Номенклатура</label>
+      <input type="file" name="file" accept=".csv" required>
+      <button>Загрузить</button>
+    </form>
+    <form action="/import/sales" method="post" enctype="multipart/form-data">
+      <label>Продажи</label>
+      <input type="file" name="file" accept=".csv" required>
+      <button>Загрузить</button>
+    </form>
+    <form action="/import/stocks" method="post" enctype="multipart/form-data">
+      <label>Остатки</label>
+      <input type="file" name="file" accept=".csv" required>
+      <button>Загрузить</button>
+    </form>
+    <form action="/import/purchases" method="post" enctype="multipart/form-data">
+      <label>Реальные закупки</label>
+      <input type="file" name="file" accept=".csv" required>
+      <button>Загрузить</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Сформировать прогноз</h2>
+    <form
+      action="/forecast"
+      method="post"
+      data-loading-message="Ожидайте, идет расчет рекомендации. Это может занять до минуты, если включен календарь событий."
+    >
+      <label>Период поставки с</label>
+      <input type="date" name="target_start" value="{{ default_start }}" required>
+      <label>по</label>
+      <input type="date" name="target_end" value="{{ default_end }}" required>
+      <label>Что считать</label>
+      <input
+        type="text"
+        name="category"
+        value="{{ settings.mvp_product_category }}"
+        list="product-options"
+        placeholder="Например: Гвоздика или Гвоздика кустовая"
+        required
+      >
+      <datalist id="product-options">
+        {% for option in product_options %}
+          <option value="{{ option }}"></option>
+        {% endfor %}
+      </datalist>
+      <label class="checkbox">
+        <input type="checkbox" name="with_ai" value="true">
+        Учесть календарь событий и праздников
+      </label>
+      <button class="primary">Рассчитать</button>
+    </form>
+    {% if latest_run %}
+      <a class="last-run" href="/runs/{{ latest_run.id }}">Последний расчет: {{ latest_run.created_at.strftime("%d.%m.%Y %H:%M") }}</a>
+    {% endif %}
+    <form class="single-action danger-action" action="/admin/reset-data" method="post">
+      <button type="submit">Очистить базу</button>
+    </form>
+  </div>
+</section>
+
+<section class="quick-links">
+  <a class="quick-card" href="/analytics?category={{ settings.mvp_product_category }}">
+    <strong>Аналитика продаж и остатков</strong>
+    <span>Графики продаж по дням и снимков остатков.</span>
+  </a>
+  <a class="quick-card" href="/backtest?category={{ settings.mvp_product_category }}">
+    <strong>Проверка на истории</strong>
+    <span>Сравнение рекомендации с фактической закупкой и продажами.</span>
+  </a>
+</section>
+
+<section class="panel wide">
+  <h2>Ожидаемые колонки CSV</h2>
+  <div class="columns">
+    <p><b>products:</b> onec_id, purchase_name, sales_category, flower_type, variety, height_cm, allocation_weight</p>
+    <p><b>sales:</b> date, store_id, store_name, product_id_1c, product_name, category_name, quantity, revenue, sale_type</p>
+    <p><b>stocks:</b> date, store_id, store_name, product_id_1c, product_name, category_name, quantity</p>
+    <p><b>purchases:</b> order_date, delivery_date, product_id_1c, product_name, category_name, quantity_ordered, quantity_received, supplier</p>
+  </div>
+</section>
+{% endblock %}

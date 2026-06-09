@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero compact">
+  <div>
+    <h1>Проверка на истории</h1>
+    <p>{{ category }} за {{ target_start.strftime("%d.%m.%Y") }} - {{ target_end.strftime("%d.%m.%Y") }}</p>
+  </div>
+  <a class="button" href="/">На главную</a>
+</section>
+
+<section class="panel wide">
+  <form class="filters" action="/backtest" method="get">
+    <label>Категория</label>
+    <input type="text" name="category" value="{{ category }}" required>
+    <label>Период с</label>
+    <input type="date" name="target_start" value="{{ target_start }}" required>
+    <label>по</label>
+    <input type="date" name="target_end" value="{{ target_end }}" required>
+    <button class="primary">Проверить</button>
+  </form>
+</section>
+
+<section class="summary-grid">
+  <div class="metric"><strong>{{ "%.0f"|format(result.total_opening_stock) }}</strong><span>остаток до периода</span></div>
+  <div class="metric"><strong>{{ "%.0f"|format(result.total_recommended) }}</strong><span>рекомендация</span></div>
+  <div class="metric"><strong>{{ "%.0f"|format(result.total_actual_purchase) }}</strong><span>факт закупки</span></div>
+  <div class="metric"><strong>{{ "%.0f"|format(result.total_actual_sales) }}</strong><span>факт продаж</span></div>
+</section>
+
+<section class="summary-grid">
+  <div class="metric"><strong>{{ "%.0f"|format(result.total_actual_leftover) }}</strong><span>остаток на конец</span></div>
+  <div class="metric"><strong>{{ "%.0f"|format(result.total_recommended_leftover) }}</strong><span>остаток по рекомендации</span></div>
+  <div class="metric"><strong>{{ "%.0f"|format(result.total_recommended_shortage) }}</strong><span>дефицит по рекомендации</span></div>
+  <div class="metric"><strong>{{ "%.0f"|format(result.total_actual_balance_gap) }}</strong><span>неучтенные движения</span></div>
+</section>
+
+{% if not result.stock_snapshot_on_end %}
+<section class="notice warning">
+  Нет снимка остатков на {{ target_end.strftime("%d.%m.%Y") }}.
+  Ближайший снимок до: {{ result.nearest_stock_before_end.strftime("%d.%m.%Y") if result.nearest_stock_before_end else "нет" }};
+  ближайший после: {{ result.nearest_stock_after_end.strftime("%d.%m.%Y") if result.nearest_stock_after_end else "нет" }}.
+  Остаток на конец периода восстановлен расчетом от ближайшего предыдущего снимка с учетом продаж и поступлений.
+</section>
+{% endif %}
+
+<section class="panel wide">
+  <h2>Метрики</h2>
+  <div class="metrics-line">
+    <span>MAPE к закупке: <b>{% if result.purchase_mape is not none %}{{ "%.1f"|format(result.purchase_mape) }}%{% else %}—{% endif %}</b></span>
+    <span>RMSE к закупке: <b>{{ "%.0f"|format(result.purchase_rmse) }}</b></span>
+    <span>MAPE к продажам: <b>{% if result.sales_mape is not none %}{{ "%.1f"|format(result.sales_mape) }}%{% else %}—{% endif %}</b></span>
+    <span>RMSE к продажам: <b>{{ "%.0f"|format(result.sales_rmse) }}</b></span>
+  </div>
+</section>
+
+<section class="panel wide">
+  <h2>Сравнение</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Позиция</th>
+          <th>Рекомендация</th>
+          <th>Остаток до периода</th>
+          <th>Источник нач. остатка</th>
+          <th>Факт закупки</th>
+          <th>Факт продаж</th>
+          <th>Остаток на конец</th>
+          <th>Источник кон. остатка</th>
+          <th>Остаток по факту, расчет</th>
+          <th>Неучтенные движения</th>
+          <th>Остаток по рекомендации</th>
+          <th>Дефицит по рекомендации</th>
+          <th>Продано год назад</th>
+          <th>Закуплено год назад</th>
+          <th>Остаток год назад</th>
+          <th>Тренд</th>
+          <th>APE к закупке</th>
+          <th>APE к продажам</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in result.rows %}
+        <tr>
+          <td>{{ row.product_name }}</td>
+          <td><b>{{ "%.0f"|format(row.recommended) }}</b></td>
+          <td>{{ "%.0f"|format(row.opening_stock) }}</td>
+          <td>{{ row.opening_stock_source }}</td>
+          <td>{{ "%.0f"|format(row.actual_purchase) }}</td>
+          <td>{{ "%.0f"|format(row.actual_sales) }}</td>
+          <td>{{ "%.0f"|format(row.actual_leftover) }}</td>
+          <td>{{ row.actual_leftover_source }}</td>
+          <td>{{ "%.0f"|format(row.actual_modeled_leftover) }}</td>
+          <td>{{ "%.0f"|format(row.actual_balance_gap) }}</td>
+          <td>{{ "%.0f"|format(row.recommended_leftover) }}</td>
+          <td>{{ "%.0f"|format(row.recommended_shortage) }}</td>
+          <td>{{ "%.0f"|format(row.historical_sold) }}</td>
+          <td>{{ "%.0f"|format(row.historical_purchased) }}</td>
+          <td>{{ "%.0f"|format(row.historical_leftover) }}</td>
+          <td>{{ "%.2f"|format(row.trend_coefficient) }}</td>
+          <td>{% if row.purchase_ape is not none %}{{ "%.1f"|format(row.purchase_ape) }}%{% else %}—{% endif %}</td>
+          <td>{% if row.sales_ape is not none %}{{ "%.1f"|format(row.sales_ape) }}%{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="panel-note">
+    Неучтенные движения = реальный остаток по снимку минус расчетный остаток
+    по цепочке "остаток до периода + поступления по дням - продажи по дням".
+    Если значение не равно нулю, значит в данных есть списания, перемещения, корректировки
+    или не все движения товара попали в выгрузку.
+  </p>
+  {% if not result.rows %}
+    <p class="panel-note">Нет активных закупочных позиций для выбранной категории. Проверьте номенклатуру.</p>
+  {% endif %}
+</section>
+{% endblock %}

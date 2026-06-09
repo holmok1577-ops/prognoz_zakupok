@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero compact">
+  <div>
+    <h1>Аналитика продаж</h1>
+    <p>{{ category }} за {{ start.strftime("%d.%m.%Y") }} - {{ end.strftime("%d.%m.%Y") }}</p>
+  </div>
+  <a class="button" href="/">На главную</a>
+</section>
+
+<section class="panel wide">
+  <form class="filters" action="/analytics" method="get">
+    <label>Категория</label>
+    <input type="text" name="category" value="{{ category }}" required>
+    <label>С</label>
+    <input type="date" name="start" value="{{ start }}" required>
+    <label>По</label>
+    <input type="date" name="end" value="{{ end }}" required>
+    <button class="primary">Обновить</button>
+  </form>
+</section>
+
+<section class="summary-grid">
+  <div class="metric"><strong>{{ "%.0f"|format(summary.sales_total) }}</strong><span>продано за период</span></div>
+  <div class="metric"><strong>{{ "%.0f"|format(summary.stock_latest) }}</strong><span>последний остаток</span></div>
+  <div class="metric"><strong>{{ summary.days_count }}</strong><span>дней в анализе</span></div>
+</section>
+
+<section class="analytics-grid">
+  <div class="panel chart-panel">
+    <h2>Продажи по дням</h2>
+    <canvas id="salesChart" width="680" height="280"></canvas>
+  </div>
+  <div class="panel chart-panel">
+    <h2>Остатки по снимкам</h2>
+    <canvas id="stockChart" width="680" height="280"></canvas>
+  </div>
+</section>
+
+<script id="analytics-data" type="application/json">{{ analytics_json | safe }}</script>
+<script src="{{ url_for('static', path='/analytics.js') }}?v=2"></script>
+{% endblock %}
