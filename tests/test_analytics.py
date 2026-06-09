@@ -96,6 +96,31 @@ def test_analytics_does_not_include_store_sales_without_store_source_data():
     assert "stores_count" not in data["summary"]
 
 
+def test_analytics_group_suffix_uses_underlying_category():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    base = Product(onec_id="base", purchase_name="Гвоздика", sales_category="Гвоздика", flower_type="carnation")
+    bush = Product(onec_id="bush", purchase_name="Гвоздика кустовая", sales_category="Гвоздика", flower_type="carnation")
+    session.add_all([base, bush])
+    session.flush()
+    session.add_all(
+        [
+            Sale(sale_date=date(2026, 6, 1), product_id=base.id, quantity=10, revenue=1000, source_row_hash="base-sale"),
+            Sale(sale_date=date(2026, 6, 1), product_id=bush.id, quantity=20, revenue=2000, source_row_hash="bush-sale"),
+            Stock(stock_date=date(2026, 6, 1), product_id=base.id, quantity=5),
+            Stock(stock_date=date(2026, 6, 1), product_id=bush.id, quantity=7),
+        ]
+    )
+    session.commit()
+
+    data = build_analytics_data(session, "Гвоздика общ", date(2026, 6, 1), date(2026, 6, 1))
+
+    assert data["summary"]["sales_total"] == 30
+    assert data["summary"]["stock_latest"] == 12
+
+
 def test_backtest_marks_missing_end_stock_snapshot_as_unknown():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)

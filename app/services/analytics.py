@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import Product, PurchaseOrder, Sale, Stock
-from app.services.forecast import ForecastItem, build_statistical_forecast
+from app.services.forecast import ForecastItem, build_statistical_forecast, _products_for_query
 
 
 @dataclass(frozen=True)
@@ -59,14 +59,7 @@ class BacktestResult:
 
 
 def _product_ids_for_category(db: Session, category: str) -> list[int]:
-    return list(
-        db.scalars(
-            select(Product.id).where(
-                Product.sales_category == category,
-                Product.active.is_(True),
-            )
-        )
-    )
+    return [product.id for product in _products_for_query(db, category)]
 
 
 def _has_stock_snapshot_for_category(db: Session, product_ids: list[int], stock_date: date) -> bool:

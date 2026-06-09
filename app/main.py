@@ -18,6 +18,7 @@ from app.services.forecast import (
     build_statistical_forecast,
     evaluate_against_actual_purchases,
     _display_category_name,
+    _products_for_query,
     save_recommendation_run,
 )
 from app.services.importer import (
@@ -54,17 +55,7 @@ def health() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
-    products_count = db.scalar(
-        select(func.count(Product.id)).where(
-            Product.sales_category == settings.mvp_product_category,
-            Product.active.is_(True),
-            or_(
-                exists(select(Sale.id).where(Sale.product_id == Product.id)),
-                exists(select(Stock.id).where(Stock.product_id == Product.id)),
-                exists(select(PurchaseOrder.id).where(PurchaseOrder.product_id == Product.id)),
-            ),
-        )
-    ) or 0
+    products_count = len(_products_for_query(db, settings.mvp_product_category))
     sales_count = db.scalar(select(func.count(Sale.id))) or 0
     stocks_count = db.scalar(select(func.count(Stock.id))) or 0
     purchases_count = db.scalar(select(func.count(PurchaseOrder.id))) or 0
