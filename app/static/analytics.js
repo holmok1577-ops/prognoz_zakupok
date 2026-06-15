@@ -88,10 +88,11 @@
   function drawHorizontalBarChart(canvasId, rows, options) {
     const canvas = document.getElementById(canvasId);
     const ctx = canvas.getContext("2d");
+    const visibleRows = rows;
+    canvas.height = Math.max(320, visibleRows.length * 30 + 76);
     const width = canvas.width;
     const height = canvas.height;
-    const visibleRows = rows.slice(0, 18);
-    const pad = { top: 18, right: 72, bottom: 24, left: 220 };
+    const pad = { top: 18, right: 86, bottom: 34, left: 310 };
     clear(ctx, width, height);
 
     if (!visibleRows.length) {
