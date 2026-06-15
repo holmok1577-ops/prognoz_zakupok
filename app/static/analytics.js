@@ -14,7 +14,7 @@
     empty: "Нет снимков остатков за выбранный период",
   });
   if (document.getElementById("storeSalesChart")) {
-    drawBarChart("storeSalesChart", data.store_sales || [], {
+    drawHorizontalBarChart("storeSalesChart", data.store_sales || [], {
       color: "#42576a",
       empty: "Нет продаж по магазинам за выбранный период",
     });
@@ -85,55 +85,69 @@
     });
   }
 
-  function drawBarChart(canvasId, rows, options) {
+  function drawHorizontalBarChart(canvasId, rows, options) {
     const canvas = document.getElementById(canvasId);
     const ctx = canvas.getContext("2d");
     const width = canvas.width;
     const height = canvas.height;
-    const pad = { top: 22, right: 18, bottom: 82, left: 58 };
+    const visibleRows = rows.slice(0, 18);
+    const pad = { top: 18, right: 72, bottom: 24, left: 220 };
     clear(ctx, width, height);
 
-    if (!rows.length) {
+    if (!visibleRows.length) {
       drawEmpty(ctx, width, height, options.empty);
       return;
     }
 
-    const values = rows.map((row) => Number(row.quantity || 0));
+    const values = visibleRows.map((row) => Number(row.quantity || 0));
     const maxValue = Math.max(...values, 1);
     const plotWidth = width - pad.left - pad.right;
     const plotHeight = height - pad.top - pad.bottom;
-    const gap = 10;
-    const barWidth = Math.max(18, (plotWidth - gap * (rows.length - 1)) / rows.length);
+    const gap = 8;
+    const barHeight = Math.max(12, (plotHeight - gap * (visibleRows.length - 1)) / visibleRows.length);
 
-    drawAxes(ctx, pad, width, height, maxValue);
-    rows.forEach((row, index) => {
+    drawHorizontalAxes(ctx, pad, width, height, maxValue);
+    visibleRows.forEach((row, index) => {
       const value = Number(row.quantity || 0);
-      const x = pad.left + index * (barWidth + gap);
-      const barHeight = (value / maxValue) * plotHeight;
-      const y = pad.top + plotHeight - barHeight;
+      const y = pad.top + index * (barHeight + gap);
+      const barWidth = (value / maxValue) * plotWidth;
       ctx.fillStyle = options.color;
-      ctx.fillRect(x, y, barWidth, barHeight);
+      ctx.fillRect(pad.left, y, barWidth, barHeight);
+
       ctx.fillStyle = "#172018";
-      ctx.font = "12px Inter, system-ui, sans-serif";
-      ctx.fillText(Math.round(value).toString(), x, Math.max(14, y - 6));
-      drawRotatedLabel(ctx, shortLabel(row.store), x + barWidth / 2, height - 14);
+      ctx.font = "13px Inter, system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.fillText(fitLabel(ctx, row.store, pad.left - 18), pad.left - 12, y + barHeight * 0.7);
+
+      ctx.textAlign = "left";
+      ctx.fillText(Math.round(value).toString(), pad.left + barWidth + 8, y + barHeight * 0.7);
     });
+    ctx.textAlign = "left";
   }
 
-  function drawRotatedLabel(ctx, text, x, y) {
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate(-Math.PI / 5);
+  function drawHorizontalAxes(ctx, pad, width, height, maxValue) {
+    ctx.strokeStyle = "#dfe4dd";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, pad.top);
+    ctx.lineTo(pad.left, height - pad.bottom);
+    ctx.lineTo(width - pad.right, height - pad.bottom);
+    ctx.stroke();
+
     ctx.fillStyle = "#697268";
     ctx.font = "12px Inter, system-ui, sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(text, 0, 0);
-    ctx.restore();
+    ctx.fillText("0", pad.left - 4, height - 6);
+    ctx.fillText(Math.round(maxValue).toString(), width - pad.right - 20, height - 6);
   }
 
-  function shortLabel(value) {
+  function fitLabel(ctx, value, maxWidth) {
     const text = String(value || "");
-    return text.length > 18 ? `${text.slice(0, 17)}...` : text;
+    if (ctx.measureText(text).width <= maxWidth) return text;
+    let candidate = text;
+    while (candidate.length > 4 && ctx.measureText(`${candidate}...`).width > maxWidth) {
+      candidate = candidate.slice(0, -1);
+    }
+    return `${candidate}...`;
   }
 
   function formatDate(value) {

@@ -439,6 +439,7 @@ def _stock_by_store(db: Session, product_ids: list[int], start: date, end: date)
                 "store": store_name,
                 "latest_quantity": latest_quantity,
                 "latest_date": latest_date.isoformat() if latest_date else "",
+                "latest_date_display": _format_short_date(latest_date),
                 "average_weekly_stock": _average(weekly_averages) or 0,
             }
         )
@@ -493,6 +494,10 @@ def _attention_signals(store_sales: list[dict], store_stock: list[dict], days_co
 
 def _date_range(start: date, end: date) -> list[date]:
     return [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
+
+
+def _format_short_date(value: date | None) -> str:
+    return value.strftime("%d.%m.%y") if value else ""
 
 
 def _average(values: list[float]) -> float | None:

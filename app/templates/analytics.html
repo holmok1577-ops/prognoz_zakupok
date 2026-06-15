@@ -102,7 +102,7 @@
           <tr class="{% if row.latest_quantity <= 0 %}row-danger{% elif row.latest_quantity < row.average_weekly_stock * 0.35 %}row-warning{% endif %}">
             <td>{{ row.store }}</td>
             <td>{{ "%.0f"|format(row.latest_quantity) }}</td>
-            <td>{{ row.latest_date }}</td>
+            <td class="nowrap">{{ row.latest_date_display }}</td>
             <td>{{ "%.0f"|format(row.average_weekly_stock) }}</td>
           </tr>
           {% endfor %}
@@ -115,5 +115,5 @@
 {% endif %}
 
 <script id="analytics-data" type="application/json">{{ analytics_json | safe }}</script>
-<script src="/static/analytics.js?v=4"></script>
+<script src="/static/analytics.js?v=5"></script>
 {% endblock %}

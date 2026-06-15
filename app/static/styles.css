@@ -594,6 +594,11 @@ td {
   vertical-align: top;
 }
 
+td.nowrap,
+th.nowrap {
+  white-space: nowrap;
+}
+
 th {
   color: var(--muted);
   font-size: 13px;
@@ -601,6 +606,11 @@ th {
 
 .compact-table {
   min-width: 560px;
+}
+
+.compact-table th,
+.compact-table td {
+  line-height: 1.25;
 }
 
 .row-danger td {
