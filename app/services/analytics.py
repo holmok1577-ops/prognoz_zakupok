@@ -5,7 +5,7 @@ from math import sqrt
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Product, PurchaseOrder, Sale, Stock
+from app.models import Product, PurchaseOrder, Sale, Stock, Store
 from app.services.forecast import ForecastItem, build_statistical_forecast, _products_for_query
 
 
@@ -314,6 +314,7 @@ def build_analytics_data(db: Session, category: str, start: date, end: date) -> 
             "summary": {
                 "sales_total": 0,
                 "stock_latest": 0,
+                "average_weekly_stock": 0,
                 "days_count": (end - start).days + 1,
             },
         }
@@ -351,15 +352,143 @@ def build_analytics_data(db: Session, category: str, start: date, end: date) -> 
     ]
 
     latest_stock = stock_snapshots[-1]["quantity"] if stock_snapshots else 0
-    return {
+    store_sales = _sales_by_store(db, product_ids, start, end)
+    store_stock = _stock_by_store(db, product_ids, start, end)
+    attention = _attention_signals(store_sales, store_stock, (end - start).days + 1)
+    result = {
         "daily_sales": daily_sales,
         "stock_snapshots": stock_snapshots,
+        "store_stock": store_stock,
+        "attention": attention,
         "summary": {
             "sales_total": sum(row["quantity"] for row in daily_sales),
             "stock_latest": latest_stock,
+            "average_weekly_stock": _average_weekly_stock(db, product_ids, start, end),
             "days_count": (end - start).days + 1,
         },
     }
+    if store_sales:
+        result["store_sales"] = store_sales
+        result["summary"]["stores_count"] = len(store_sales)
+    return result
+
+
+def _sales_by_store(db: Session, product_ids: list[int], start: date, end: date) -> list[dict]:
+    if not product_ids:
+        return []
+    rows = [
+        {"store": row.store_name or "Без точки", "quantity": float(row.quantity or 0)}
+        for row in db.execute(
+            select(Store.name.label("store_name"), func.coalesce(func.sum(Sale.quantity), 0).label("quantity"))
+            .join(Store, Store.id == Sale.store_id)
+            .where(
+                Sale.product_id.in_(product_ids),
+                Sale.sale_date >= start,
+                Sale.sale_date <= end,
+            )
+            .group_by(Store.name)
+            .order_by(func.coalesce(func.sum(Sale.quantity), 0).desc())
+        )
+    ]
+    return [row for row in rows if row["quantity"] > 0]
+
+
+def _stock_rows_by_store(db: Session, product_ids: list[int], start: date, end: date) -> list[tuple[date, str, float]]:
+    if not product_ids:
+        return []
+    return [
+        (row.stock_date, row.store_name or "Без точки", float(row.quantity or 0))
+        for row in db.execute(
+            select(
+                Stock.stock_date.label("stock_date"),
+                Store.name.label("store_name"),
+                func.coalesce(func.sum(Stock.quantity), 0).label("quantity"),
+            )
+            .join(Store, Store.id == Stock.store_id)
+            .where(
+                Stock.product_id.in_(product_ids),
+                Stock.stock_date >= start,
+                Stock.stock_date <= end,
+            )
+            .group_by(Stock.stock_date, Store.name)
+            .order_by(Stock.stock_date, Store.name)
+        )
+    ]
+
+
+def _stock_by_store(db: Session, product_ids: list[int], start: date, end: date) -> list[dict]:
+    rows = _stock_rows_by_store(db, product_ids, start, end)
+    if not rows:
+        return []
+
+    weekly_by_store: dict[str, dict[tuple[int, int], list[float]]] = {}
+    latest_by_store: dict[str, tuple[date, float]] = {}
+    for stock_date, store_name, quantity in rows:
+        week = stock_date.isocalendar()[:2]
+        weekly_by_store.setdefault(store_name, {})
+        weekly_by_store[store_name].setdefault(week, []).append(quantity)
+        if store_name not in latest_by_store or stock_date >= latest_by_store[store_name][0]:
+            latest_by_store[store_name] = (stock_date, quantity)
+
+    result = []
+    for store_name, weekly_values in weekly_by_store.items():
+        latest_date, latest_quantity = latest_by_store.get(store_name, (None, 0))
+        weekly_averages = [_average(values) or 0 for values in weekly_values.values()]
+        result.append(
+            {
+                "store": store_name,
+                "latest_quantity": latest_quantity,
+                "latest_date": latest_date.isoformat() if latest_date else "",
+                "average_weekly_stock": _average(weekly_averages) or 0,
+            }
+        )
+    return sorted(result, key=lambda row: row["latest_quantity"])
+
+
+def _average_weekly_stock(db: Session, product_ids: list[int], start: date, end: date) -> float:
+    rows = [
+        (row.stock_date, float(row.quantity or 0))
+        for row in db.execute(
+            select(Stock.stock_date, func.coalesce(func.sum(Stock.quantity), 0).label("quantity"))
+            .where(
+                Stock.product_id.in_(product_ids),
+                Stock.stock_date >= start,
+                Stock.stock_date <= end,
+            )
+            .group_by(Stock.stock_date)
+        )
+    ]
+    weekly_totals: dict[tuple[int, int], list[float]] = {}
+    for stock_date, quantity in rows:
+        week = stock_date.isocalendar()[:2]
+        weekly_totals.setdefault(week, []).append(quantity)
+    weekly_averages = [_average(values) or 0 for values in weekly_totals.values()]
+    return _average(weekly_averages) or 0
+
+
+def _attention_signals(store_sales: list[dict], store_stock: list[dict], days_count: int) -> list[dict]:
+    sales_by_store = {row["store"]: row["quantity"] for row in store_sales}
+    signals = []
+    for stock_row in store_stock:
+        store_name = stock_row["store"]
+        sold = sales_by_store.get(store_name, 0)
+        avg_daily_sales = sold / max(days_count, 1)
+        latest_stock = stock_row["latest_quantity"]
+        days_left = latest_stock / avg_daily_sales if avg_daily_sales > 0 else None
+        if days_left is not None and days_left <= 3:
+            signals.append(
+                {
+                    "level": "danger" if days_left <= 1.5 else "warning",
+                    "store": store_name,
+                    "title": "Быстро заканчивается",
+                    "text": (
+                        f"В точке {store_name} остатка примерно на {days_left:.1f} дн. "
+                        f"при текущем темпе продаж. Стоит проверить увеличение поставки."
+                    ),
+                    "days_left": days_left,
+                }
+            )
+    return sorted(signals, key=lambda row: row["days_left"])
 
 
 def _date_range(start: date, end: date) -> list[date]:

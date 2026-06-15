@@ -302,6 +302,7 @@ def analytics(
             "category": category,
             "start": start,
             "end": end,
+            "analytics": data,
             "analytics_json": json.dumps(data, ensure_ascii=False),
             "summary": data["summary"],
         },

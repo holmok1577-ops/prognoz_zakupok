@@ -39,7 +39,7 @@
   <h2>Детализация по номенклатурам</h2>
   <div class="recommendation-list">
     {% for item in run.items %}
-    <article class="recommendation-card {% if item.historical_sold == 0 %}warning{% endif %}">
+    <article class="recommendation-card {% if item.historical_sold == 0 %}warning{% elif item.trend_coefficient >= 1.2 or (item.historical_purchased > 0 and item.final_quantity >= item.historical_purchased * 1.4) %}attention{% endif %}">
       <div class="recommendation-main">
         <div>
           <span class="eyebrow">{{ item.product.purchase_name }}</span>
@@ -59,6 +59,16 @@
       {% if item.historical_sold == 0 %}
       <div class="inline-warning">
         Нет продаж за аналогичный период прошлого года. Это не рабочая рекомендация, а сигнал, что нужно загрузить историю или выбрать период с данными.
+      </div>
+      {% elif item.trend_coefficient >= 1.2 %}
+      <div class="inline-warning accent-warning">
+        Продажи перед расчетным периодом выше прошлогоднего уровня: тренд {{ "%.2f"|format(item.trend_coefficient) }}.
+        В первую очередь проверьте эту позицию, потому что при сохранении темпа она закончится быстрее обычного.
+      </div>
+      {% elif item.historical_purchased > 0 and item.final_quantity >= item.historical_purchased * 1.4 %}
+      <div class="inline-warning accent-warning">
+        Рекомендация заметно выше прошлогодней закупки. Причина: расчетный спрос и страховой запас выше,
+        поэтому стоит проверить, хватало ли объема в прошлый раз и не закончился ли товар слишком быстро.
       </div>
       {% endif %}
       <p>{{ item.explanation }}</p>

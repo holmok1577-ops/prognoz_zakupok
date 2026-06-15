@@ -23,8 +23,23 @@
 <section class="summary-grid">
   <div class="metric"><strong>{{ "%.0f"|format(summary.sales_total) }}</strong><span>продано за период</span></div>
   <div class="metric"><strong>{{ "%.0f"|format(summary.stock_latest) }}</strong><span>последний остаток</span></div>
+  <div class="metric"><strong>{{ "%.0f"|format(summary.average_weekly_stock) }}</strong><span>средний остаток в неделю</span></div>
   <div class="metric"><strong>{{ summary.days_count }}</strong><span>дней в анализе</span></div>
 </section>
+
+{% if analytics.attention %}
+<section class="panel wide attention-panel">
+  <h2>На что обратить внимание</h2>
+  <div class="attention-list">
+    {% for signal in analytics.attention %}
+    <div class="attention-item {{ signal.level }}">
+      <strong>{{ signal.title }}</strong>
+      <span>{{ signal.text }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 <section class="analytics-grid">
   <div class="panel chart-panel">
@@ -35,8 +50,70 @@
     <h2>Остатки по снимкам</h2>
     <canvas id="stockChart" width="680" height="280"></canvas>
   </div>
+  {% if analytics.store_sales %}
+  <div class="panel chart-panel wide-chart">
+    <h2>Продажи по магазинам</h2>
+    <canvas id="storeSalesChart" width="1020" height="300"></canvas>
+  </div>
+  {% endif %}
 </section>
 
+{% if analytics.store_sales or analytics.store_stock %}
+<section class="analytics-grid wide">
+  {% if analytics.store_sales %}
+  <div class="panel">
+    <h2>Кто сколько продает</h2>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Магазин</th>
+            <th>Продано, шт.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in analytics.store_sales %}
+          <tr>
+            <td>{{ row.store }}</td>
+            <td>{{ "%.0f"|format(row.quantity) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if analytics.store_stock %}
+  <div class="panel">
+    <h2>Средние остатки по магазинам</h2>
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Магазин / склад</th>
+            <th>Последний остаток</th>
+            <th>Дата остатка</th>
+            <th>Средний остаток в неделю</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in analytics.store_stock %}
+          <tr class="{% if row.latest_quantity <= 0 %}row-danger{% elif row.latest_quantity < row.average_weekly_stock * 0.35 %}row-warning{% endif %}">
+            <td>{{ row.store }}</td>
+            <td>{{ "%.0f"|format(row.latest_quantity) }}</td>
+            <td>{{ row.latest_date }}</td>
+            <td>{{ "%.0f"|format(row.average_weekly_stock) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
 <script id="analytics-data" type="application/json">{{ analytics_json | safe }}</script>
-<script src="/static/analytics.js?v=3"></script>
+<script src="/static/analytics.js?v=4"></script>
 {% endblock %}

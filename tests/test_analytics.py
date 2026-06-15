@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
-from app.models import Product, Sale, Stock
+from app.models import Product, Sale, Stock, Store
 from app.services.importer import _as_date
 from app.services.analytics import build_analytics_data, build_backtest
 
@@ -119,6 +119,61 @@ def test_analytics_group_suffix_uses_underlying_category():
 
     assert data["summary"]["sales_total"] == 30
     assert data["summary"]["stock_latest"] == 12
+
+
+def test_analytics_includes_store_sales_and_average_weekly_stock():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    product = Product(
+        onec_id="carnation_used",
+        purchase_name="Гвоздика красная",
+        sales_category="Гвоздика",
+        flower_type="carnation",
+    )
+    store_one = Store(onec_id="store-1", name="Магазин 1")
+    store_two = Store(onec_id="store-2", name="Магазин 2")
+    session.add_all([product, store_one, store_two])
+    session.flush()
+    session.add_all(
+        [
+            Sale(
+                sale_date=date(2026, 6, 1),
+                store_id=store_one.id,
+                product_id=product.id,
+                quantity=30,
+                revenue=3000,
+                source_row_hash="sale-1",
+            ),
+            Sale(
+                sale_date=date(2026, 6, 2),
+                store_id=store_two.id,
+                product_id=product.id,
+                quantity=4,
+                revenue=400,
+                source_row_hash="sale-2",
+            ),
+            Stock(stock_date=date(2026, 6, 1), store_id=store_one.id, product_id=product.id, quantity=20),
+            Stock(stock_date=date(2026, 6, 2), store_id=store_one.id, product_id=product.id, quantity=10),
+            Stock(stock_date=date(2026, 6, 8), store_id=store_one.id, product_id=product.id, quantity=6),
+            Stock(stock_date=date(2026, 6, 1), store_id=store_two.id, product_id=product.id, quantity=5),
+        ]
+    )
+    session.commit()
+
+    data = build_analytics_data(session, "Гвоздика", date(2026, 6, 1), date(2026, 6, 14))
+
+    assert data["store_sales"] == [
+        {"store": "Магазин 1", "quantity": 30.0},
+        {"store": "Магазин 2", "quantity": 4.0},
+    ]
+    assert data["summary"]["stores_count"] == 2
+    assert data["summary"]["average_weekly_stock"] == 11.75
+    store_one_stock = next(row for row in data["store_stock"] if row["store"] == "Магазин 1")
+    assert store_one_stock["latest_quantity"] == 6
+    assert store_one_stock["average_weekly_stock"] == 10.5
+    assert data["attention"][0]["store"] == "Магазин 1"
 
 
 def test_backtest_marks_missing_end_stock_snapshot_as_unknown():

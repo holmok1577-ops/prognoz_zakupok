@@ -13,6 +13,12 @@
     fill: "rgba(138, 90, 18, 0.12)",
     empty: "Нет снимков остатков за выбранный период",
   });
+  if (document.getElementById("storeSalesChart")) {
+    drawBarChart("storeSalesChart", data.store_sales || [], {
+      color: "#42576a",
+      empty: "Нет продаж по магазинам за выбранный период",
+    });
+  }
 
   function drawLineChart(canvasId, rows, options) {
     const canvas = document.getElementById(canvasId);
@@ -77,6 +83,57 @@
     labels.forEach((row, index) => {
       ctx.fillText(formatDate(row.date), positions[index], height - 14);
     });
+  }
+
+  function drawBarChart(canvasId, rows, options) {
+    const canvas = document.getElementById(canvasId);
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width;
+    const height = canvas.height;
+    const pad = { top: 22, right: 18, bottom: 82, left: 58 };
+    clear(ctx, width, height);
+
+    if (!rows.length) {
+      drawEmpty(ctx, width, height, options.empty);
+      return;
+    }
+
+    const values = rows.map((row) => Number(row.quantity || 0));
+    const maxValue = Math.max(...values, 1);
+    const plotWidth = width - pad.left - pad.right;
+    const plotHeight = height - pad.top - pad.bottom;
+    const gap = 10;
+    const barWidth = Math.max(18, (plotWidth - gap * (rows.length - 1)) / rows.length);
+
+    drawAxes(ctx, pad, width, height, maxValue);
+    rows.forEach((row, index) => {
+      const value = Number(row.quantity || 0);
+      const x = pad.left + index * (barWidth + gap);
+      const barHeight = (value / maxValue) * plotHeight;
+      const y = pad.top + plotHeight - barHeight;
+      ctx.fillStyle = options.color;
+      ctx.fillRect(x, y, barWidth, barHeight);
+      ctx.fillStyle = "#172018";
+      ctx.font = "12px Inter, system-ui, sans-serif";
+      ctx.fillText(Math.round(value).toString(), x, Math.max(14, y - 6));
+      drawRotatedLabel(ctx, shortLabel(row.store), x + barWidth / 2, height - 14);
+    });
+  }
+
+  function drawRotatedLabel(ctx, text, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-Math.PI / 5);
+    ctx.fillStyle = "#697268";
+    ctx.font = "12px Inter, system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  function shortLabel(value) {
+    const text = String(value || "");
+    return text.length > 18 ? `${text.slice(0, 17)}...` : text;
   }
 
   function formatDate(value) {
