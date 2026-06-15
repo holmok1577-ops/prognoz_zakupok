@@ -53,21 +53,42 @@ def import_onec_sales_xls(db: Session, file: BinaryIO) -> int:
     header_row = _find_row_starting(sheet, "Период день")
     if header_row is None:
         raise ValueError("Не найден заголовок 'Период день' в отчете продаж.")
-    products = _product_columns(sheet, header_row)
+    store_name = _filtered_store_name(sheet)
+    store_layout = _sales_store_layout(sheet, header_row)
     rows = []
     for row_idx in range(header_row + 2, sheet.nrows):
         sale_date = _cell_date(sheet, row_idx, 0)
         if not sale_date:
             continue
-        for col_idx, product_name in products:
+        if store_layout:
+            product_name, stores = store_layout
+            for col_idx, column_store_name in stores:
+                quantity = _cell_float(sheet, row_idx, col_idx)
+                if quantity == 0:
+                    continue
+                rows.append(
+                    {
+                        "date": sale_date.isoformat(),
+                        "store_id": column_store_name,
+                        "store_name": column_store_name,
+                        "product_id_1c": product_name,
+                        "product_name": product_name,
+                        "category_name": _sales_category_for_name(product_name),
+                        "quantity": quantity,
+                        "revenue": 0,
+                        "sale_type": "retail",
+                    }
+                )
+            continue
+        for col_idx, product_name in _product_columns(sheet, header_row):
             quantity = _cell_float(sheet, row_idx, col_idx)
             if quantity == 0:
                 continue
             rows.append(
                 {
                     "date": sale_date.isoformat(),
-                    "store_id": "",
-                    "store_name": "",
+                    "store_id": store_name,
+                    "store_name": store_name,
                     "product_id_1c": product_name,
                     "product_name": product_name,
                     "category_name": _sales_category_for_name(product_name),
@@ -237,6 +258,33 @@ def _product_columns(sheet, header_row: int) -> list[tuple[int, str]]:
             continue
         products.append((col_idx, name))
     return products
+
+
+def _sales_store_layout(sheet, header_row: int) -> tuple[str, list[tuple[int, str]]] | None:
+    first_metric_col = None
+    for col_idx in range(1, sheet.ncols):
+        name = _cell_text(sheet, header_row, col_idx)
+        metric = _cell_text(sheet, header_row + 1, col_idx)
+        if name and metric == "Количество товаров":
+            first_metric_col = col_idx
+            break
+    if first_metric_col is None:
+        return None
+
+    product_name = _cell_text(sheet, header_row, first_metric_col)
+    if not _flower_type_for_name(product_name):
+        return None
+
+    stores = []
+    for col_idx in range(first_metric_col + 1, sheet.ncols):
+        name = _cell_text(sheet, header_row, col_idx)
+        metric = _cell_text(sheet, header_row + 1, col_idx)
+        if not name or metric != "Количество товаров":
+            continue
+        if name == "Итого":
+            break
+        stores.append((col_idx, name))
+    return (product_name, stores) if stores else None
 
 
 def _store_columns(sheet, header_row: int) -> list[tuple[int, str]]:

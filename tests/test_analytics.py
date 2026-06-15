@@ -7,6 +7,19 @@ from app.db import Base
 from app.models import Product, Sale, Stock, Store
 from app.services.importer import _as_date
 from app.services.analytics import build_analytics_data, build_backtest
+from app.services.onec_xls_importer import _sales_store_layout
+
+
+class FakeSheet:
+    def __init__(self, rows):
+        self.rows = rows
+        self.nrows = len(rows)
+        self.ncols = max(len(row) for row in rows)
+
+    def cell_value(self, row, col):
+        if row >= self.nrows or col >= len(self.rows[row]):
+            return ""
+        return self.rows[row][col]
 
 
 def test_backtest_skips_rows_without_any_report_data():
@@ -64,6 +77,17 @@ def test_backtest_skips_rows_without_any_report_data():
 def test_import_date_parser_keeps_iso_dates_in_year_month_day_order():
     assert _as_date("2026-02-09") == date(2026, 2, 9)
     assert _as_date("09.02.2026 0:00:00") == date(2026, 2, 9)
+
+
+def test_sales_store_layout_treats_first_flower_column_as_total_and_next_columns_as_stores():
+    sheet = FakeSheet(
+        [
+            ["Период день", "", "", "Гвоздика", "Магазин 1", "Магазин 2", "Итого"],
+            ["", "", "", "Количество товаров", "Количество товаров", "Количество товаров", "Количество товаров"],
+        ]
+    )
+
+    assert _sales_store_layout(sheet, 0) == ("Гвоздика", [(4, "Магазин 1"), (5, "Магазин 2")])
 
 
 def test_analytics_does_not_include_store_sales_without_store_source_data():
