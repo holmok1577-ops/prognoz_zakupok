@@ -296,6 +296,13 @@ form:first-of-type {
   color: #8f2f2f;
 }
 
+.reset-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  margin-top: 8px;
+}
+
 .filters {
   grid-template-columns: auto minmax(170px, 1fr) auto minmax(150px, 1fr) auto minmax(150px, 1fr) auto;
   border-top: 0;
