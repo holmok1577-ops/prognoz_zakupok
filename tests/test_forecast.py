@@ -123,8 +123,9 @@ def test_statistical_forecast_uses_recent_sales_when_same_period_is_empty():
 
     assert len(items) == 1
     assert items[0].historical_sold == 0
-    assert items[0].baseline_demand == 4.375
-    assert items[0].statistical_quantity == 5
+    assert round(items[0].baseline_demand, 2) == 16.9
+    assert items[0].statistical_quantity == 18
+    assert "мало данных для анализа" in items[0].explanation
 
 
 def test_statistical_forecast_does_not_subtract_stock_snapshot_without_receipt_date():
@@ -624,3 +625,53 @@ def test_purchase_metrics_skip_empty_rows_and_do_not_fake_ape_for_zero_actual():
 
     assert len(rows) == 1
     assert rows[0]["absolute_percentage_error"] is None
+
+
+def test_short_history_uses_observed_sales_window_instead_of_full_lookback():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    product = Product(
+        onec_id="new_rose",
+        purchase_name="Вайт наоми 50",
+        sales_category="Роза",
+        flower_type="rose",
+    )
+    session.add(product)
+    session.flush()
+    session.add_all(
+        [
+            Sale(
+                sale_date=date(2026, 6, 10),
+                product_id=product.id,
+                quantity=10,
+                revenue=1000,
+                source_row_hash="new-sale-1",
+            ),
+            Sale(
+                sale_date=date(2026, 6, 11),
+                product_id=product.id,
+                quantity=10,
+                revenue=1000,
+                source_row_hash="new-sale-2",
+            ),
+            Sale(
+                sale_date=date(2026, 6, 12),
+                product_id=product.id,
+                quantity=10,
+                revenue=1000,
+                source_row_hash="new-sale-3",
+            ),
+        ]
+    )
+    session.commit()
+
+    items = build_statistical_forecast(session, date(2026, 6, 13), date(2026, 6, 19), "Роза")
+
+    assert len(items) == 1
+    assert items[0].historical_sold == 0
+    assert items[0].baseline_demand == 70
+    assert items[0].statistical_quantity == 74
+    assert "мало данных для анализа" in items[0].explanation
+    assert "нет истории за прошлые годы" in items[0].explanation

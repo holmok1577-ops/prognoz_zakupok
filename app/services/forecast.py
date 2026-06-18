@@ -337,6 +337,20 @@ def _recent_daily_sales_rate(db: Session, product_id: int, start: date, end: dat
     return _sum_sales(db, product_id, start, end) / days
 
 
+def _sales_observation_window(db: Session, product_id: int, as_of: date, fallback_start: date) -> tuple[date, date, float, int]:
+    first_sale_date = db.scalar(
+        select(func.min(Sale.sale_date)).where(
+            Sale.product_id == product_id,
+            Sale.sale_date <= as_of,
+        )
+    )
+    start = max(first_sale_date or fallback_start, fallback_start)
+    end = as_of
+    days = max((end - start).days + 1, 1)
+    sold = _sum_sales(db, product_id, start, end)
+    return start, end, sold, days
+
+
 def _expected_next_receipt_date(
     db: Session,
     product_id: int,
@@ -434,16 +448,28 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
         previous_recent_sales = _weighted_average(previous_recent_values)
         trend = current_recent_sales / previous_recent_sales if previous_recent_sales > 0 else 1.0
         trend = max(0.4, min(trend, 2.5))
+        observed_start, observed_end, observed_sales, observed_days = _sales_observation_window(
+            db,
+            product.id,
+            calculation_as_of,
+            current_lookback_start,
+        )
         if multi_year_sales > 0:
             baseline = multi_year_sales * trend
             baseline_source = "взвешенная история аналогичных периодов за последние годы с учетом тренда"
-        elif current_recent_sales > 0:
-            lookback_days = max((current_lookback_end - current_lookback_start).days + 1, 1)
-            baseline = current_recent_sales / lookback_days * period_days
-            baseline_source = "средние недавние продажи, потому что аналогичный период прошлого года пустой"
+        elif observed_sales > 0:
+            baseline = observed_sales / observed_days * period_days
+            if observed_days < 60:
+                baseline_source = (
+                    f"мало данных для анализа: нет истории за прошлые годы, "
+                    f"используем продажи с {observed_start.isoformat()} по {observed_end.isoformat()} "
+                    f"({observed_days} дн.)"
+                )
+            else:
+                baseline_source = "нет истории за прошлые годы, используем средние недавние продажи"
         else:
             baseline = 0
-            baseline_source = "данных для спроса нет"
+            baseline_source = "нет истории за прошлые годы и нет текущих продаж для расчета спроса"
         shelf_life_days = _shelf_life_days_for_product(product)
         historical_purchased = _historical_receipts_for_period_context(
             db,
