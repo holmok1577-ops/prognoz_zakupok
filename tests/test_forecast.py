@@ -299,6 +299,30 @@ def test_statistical_forecast_exact_base_product_does_not_select_whole_category(
     assert [item.product.purchase_name for item in items] == ["Гвоздика"]
 
 
+def test_bare_category_name_does_not_select_whole_group_without_common_suffix():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    kimberly = Product(onec_id="kimberly", purchase_name="Кимберли 60", sales_category="Роза", flower_type="rose")
+    naomi = Product(onec_id="naomi", purchase_name="Вайт наоми 50", sales_category="Роза", flower_type="rose")
+    session.add_all([kimberly, naomi])
+    session.flush()
+    session.add_all(
+        [
+            Sale(sale_date=date(2026, 6, 1), product_id=kimberly.id, quantity=10, revenue=1000, source_row_hash="k"),
+            Sale(sale_date=date(2026, 6, 1), product_id=naomi.id, quantity=20, revenue=2000, source_row_hash="n"),
+        ]
+    )
+    session.commit()
+
+    bare_items = build_statistical_forecast(session, date(2026, 6, 2), date(2026, 6, 8), "Роза")
+    group_items = build_statistical_forecast(session, date(2026, 6, 2), date(2026, 6, 8), "Роза общ")
+
+    assert bare_items == []
+    assert {item.product.purchase_name for item in group_items} == {"Кимберли 60", "Вайт наоми 50"}
+
+
 def test_statistical_forecast_subtracts_incoming_flowers_delivered_within_shelf_life():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)

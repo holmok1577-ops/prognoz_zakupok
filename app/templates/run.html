@@ -32,6 +32,12 @@
       <div><dt>Свежий остаток к вычету</dt><dd>{{ "%.0f"|format(recommendation_summary.usable_stock) }}</dd></div>
       <div><dt>Уже заказано к поставке</dt><dd>{{ "%.0f"|format(recommendation_summary.incoming_orders) }}</dd></div>
     </dl>
+    {% if recommendation_summary.items_count == 0 %}
+    <div class="inline-warning">
+      По этому запросу не найдено позиций с данными. Для расчета всей группы выберите вариант с пометкой
+      “общ”, например “Роза общ”. Для одной позиции укажите точное название номенклатуры.
+    </div>
+    {% endif %}
   </article>
 </section>
 

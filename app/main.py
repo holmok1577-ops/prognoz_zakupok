@@ -226,12 +226,21 @@ def create_forecast(
     db: Session = Depends(get_db),
 ):
     items = build_statistical_forecast(db, target_start, target_end, category)
+    empty_selection_note = ""
+    if not items:
+        empty_selection_note = (
+            f"По запросу '{category}' не найдено позиций с данными. "
+            "Если нужен расчет всей категории, выберите вариант с пометкой 'общ', например 'Роза общ'. "
+            "Если нужна одна позиция, введите ее точное название."
+        )
     try:
         primary_ai = build_primary_ai_recommendation(target_start, target_end, items)
     except Exception as exc:
         primary_ai = {"enabled": False, "note": f"Ошибка первичной AI-рекомендации: {exc}"}
     event_ai = {}
     notes_parts = []
+    if empty_selection_note:
+        notes_parts.append({"selection_warning": empty_selection_note})
     if primary_ai.get("enabled"):
         notes_parts.append({"primary_recommendation": primary_ai})
     elif primary_ai.get("note"):

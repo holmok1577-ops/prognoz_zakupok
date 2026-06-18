@@ -123,6 +123,15 @@ def _products_for_query(db: Session, query: str) -> list[Product]:
         ]
         if exact_products:
             return sorted(exact_products, key=lambda product: product.purchase_name)
+        category_products = [
+            product
+            for product in products_with_data
+            if _normalize_query(product.sales_category) == normalized
+        ]
+        if category_products:
+            if len(category_products) == 1:
+                return sorted(category_products, key=lambda product: product.purchase_name)
+            return []
     return sorted(
         [product for product in products_with_data if _matches_product_query(product, query)],
         key=lambda product: product.purchase_name,
@@ -673,20 +682,6 @@ def _shelf_life_days_for_product(product: Product) -> int:
 def build_statistical_forecast(db: Session, target_start: date, target_end: date, category: str) -> list[ForecastItem]:
     settings = get_settings()
     products = _products_for_query(db, category)
-    if not products:
-        products = list(
-            db.scalars(
-                select(Product).where(
-                    Product.sales_category == category,
-                    Product.active.is_(True),
-                    or_(
-                        exists(select(Sale.id).where(Sale.product_id == Product.id)),
-                        exists(select(Stock.id).where(Stock.product_id == Product.id)),
-                        exists(select(PurchaseOrder.id).where(PurchaseOrder.product_id == Product.id)),
-                    ),
-                )
-            )
-        )
     items: list[ForecastItem] = []
     period_days = (target_end - target_start).days + 1
     same_start_last_year = target_start.replace(year=target_start.year - 1)
