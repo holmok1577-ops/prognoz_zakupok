@@ -13,10 +13,28 @@ from app.models import Product, PurchaseOrder, RecommendationItem, Recommendatio
 HISTORY_YEAR_WEIGHTS = (0.55, 0.3, 0.15)
 
 
-def _same_period_years(start: date, end: date, years_back: int = 3) -> list[tuple[int, date, date]]:
+def _history_weight(index: int) -> float:
+    if index < len(HISTORY_YEAR_WEIGHTS):
+        return HISTORY_YEAR_WEIGHTS[index]
+    return HISTORY_YEAR_WEIGHTS[-1] * (0.5 ** (index - len(HISTORY_YEAR_WEIGHTS) + 1))
+
+
+def _history_year_offsets(db: Session, product_id: int, anchor_year: int, fallback_years: int = 3) -> list[int]:
+    first_sale_year = db.scalar(
+        select(func.min(func.strftime("%Y", Sale.sale_date))).where(Sale.product_id == product_id)
+    )
+    try:
+        first_year = int(first_sale_year) if first_sale_year else anchor_year - fallback_years
+    except (TypeError, ValueError):
+        first_year = anchor_year - fallback_years
+    max_offset = max(anchor_year - first_year, fallback_years)
+    return list(range(1, max_offset + 1))
+
+
+def _same_period_years(start: date, end: date, offsets: list[int] | None = None) -> list[tuple[int, date, date]]:
     period_days = (end - start).days + 1
     periods = []
-    for offset in range(1, years_back + 1):
+    for offset in offsets or [1, 2, 3]:
         shifted_start = start.replace(year=start.year - offset)
         periods.append((offset, shifted_start, shifted_start + timedelta(days=period_days - 1)))
     return periods
@@ -31,8 +49,9 @@ def _weighted_average(values: list[tuple[float, float]]) -> float:
 def _history_summary(db: Session, product_id: int, start: date, end: date) -> tuple[float, str]:
     weighted_values = []
     parts = []
-    for index, (offset, period_start, period_end) in enumerate(_same_period_years(start, end)):
-        weight = HISTORY_YEAR_WEIGHTS[index] if index < len(HISTORY_YEAR_WEIGHTS) else 0.0
+    offsets = _history_year_offsets(db, product_id, start.year)
+    for index, (offset, period_start, period_end) in enumerate(_same_period_years(start, end, offsets)):
+        weight = _history_weight(index)
         sold = _sum_sales(db, product_id, period_start, period_end)
         weighted_values.append((sold, weight))
         parts.append(f"{period_start.year}: {sold:.0f}")
@@ -172,6 +191,20 @@ class ForecastItem:
     trend_previous_end: date
     safety_stock: float
     explanation: str
+
+
+@dataclass(frozen=True)
+class SalesHistoryStats:
+    first_sale_date: date | None
+    last_sale_date: date | None
+    total_sales: float
+    total_days: int
+    last_7_sales: float
+    last_30_sales: float
+    weekly_average: float
+    monthly_average: float
+    period_average: float
+    spike_note: str
 
 
 def _sum_sales(db: Session, product_id: int, start: date, end: date) -> float:
@@ -337,18 +370,210 @@ def _recent_daily_sales_rate(db: Session, product_id: int, start: date, end: dat
     return _sum_sales(db, product_id, start, end) / days
 
 
-def _sales_observation_window(db: Session, product_id: int, as_of: date, fallback_start: date) -> tuple[date, date, float, int]:
+def _sales_history_stats(db: Session, product_id: int, as_of: date, period_days: int) -> SalesHistoryStats:
     first_sale_date = db.scalar(
         select(func.min(Sale.sale_date)).where(
             Sale.product_id == product_id,
             Sale.sale_date <= as_of,
         )
     )
-    start = max(first_sale_date or fallback_start, fallback_start)
-    end = as_of
-    days = max((end - start).days + 1, 1)
-    sold = _sum_sales(db, product_id, start, end)
-    return start, end, sold, days
+    last_sale_date = db.scalar(
+        select(func.max(Sale.sale_date)).where(
+            Sale.product_id == product_id,
+            Sale.sale_date <= as_of,
+        )
+    )
+    if not first_sale_date:
+        return SalesHistoryStats(
+            first_sale_date=None,
+            last_sale_date=None,
+            total_sales=0.0,
+            total_days=0,
+            last_7_sales=0.0,
+            last_30_sales=0.0,
+            weekly_average=0.0,
+            monthly_average=0.0,
+            period_average=0.0,
+            spike_note="",
+        )
+
+    total_days = max((as_of - first_sale_date).days + 1, 1)
+    total_sales = _sum_sales(db, product_id, first_sale_date, as_of)
+    last_7_start = max(first_sale_date, as_of - timedelta(days=6))
+    last_30_start = max(first_sale_date, as_of - timedelta(days=29))
+    last_7_days = max((as_of - last_7_start).days + 1, 1)
+    last_30_days = max((as_of - last_30_start).days + 1, 1)
+    last_7_sales = _sum_sales(db, product_id, last_7_start, as_of)
+    last_30_sales = _sum_sales(db, product_id, last_30_start, as_of)
+    weekly_average = last_7_sales / last_7_days * period_days
+    monthly_average = last_30_sales / last_30_days * period_days
+    period_average = total_sales / total_days * period_days
+
+    daily_rows = list(
+        db.execute(
+            select(Sale.sale_date, func.coalesce(func.sum(Sale.quantity), 0).label("quantity"))
+            .where(
+                Sale.product_id == product_id,
+                Sale.sale_date >= first_sale_date,
+                Sale.sale_date <= as_of,
+            )
+            .group_by(Sale.sale_date)
+            .order_by(Sale.sale_date)
+        )
+    )
+    spike_note = ""
+    positive_days = [float(row.quantity or 0) for row in daily_rows if float(row.quantity or 0) > 0]
+    if len(positive_days) >= 3:
+        average_positive_day = sum(positive_days) / len(positive_days)
+        spike_rows = [
+            row
+            for row in daily_rows
+            if float(row.quantity or 0) >= max(average_positive_day * 3, 20)
+        ]
+        if spike_rows:
+            spike = max(spike_rows, key=lambda row: float(row.quantity or 0))
+            events = []
+            try:
+                from app.services.event_calendar import demand_events_for_period
+
+                events = [
+                    event.name
+                    for event in demand_events_for_period(spike.sale_date, spike.sale_date)
+                    if event.start <= spike.sale_date <= event.end
+                ]
+            except Exception:
+                events = []
+            if events:
+                spike_note = (
+                    f"замечен всплеск {float(spike.quantity or 0):.0f} шт. "
+                    f"{spike.sale_date.isoformat()}, рядом событие: {', '.join(events[:3])}"
+                )
+            else:
+                spike_note = (
+                    f"замечен всплеск {float(spike.quantity or 0):.0f} шт. "
+                    f"{spike.sale_date.isoformat()}; похоже на разовую крупную продажу, "
+                    f"нужно проверить, не был ли это опт"
+                )
+
+    return SalesHistoryStats(
+        first_sale_date=first_sale_date,
+        last_sale_date=last_sale_date,
+        total_sales=total_sales,
+        total_days=total_days,
+        last_7_sales=last_7_sales,
+        last_30_sales=last_30_sales,
+        weekly_average=weekly_average,
+        monthly_average=monthly_average,
+        period_average=period_average,
+        spike_note=spike_note,
+    )
+
+
+def _short_history_baseline(stats: SalesHistoryStats) -> float:
+    candidates = [stats.period_average]
+    if stats.total_days >= 7:
+        candidates.append(stats.weekly_average)
+    if stats.total_days >= 30:
+        candidates.append(stats.monthly_average)
+    positive = [value for value in candidates if value > 0]
+    if not positive:
+        return 0.0
+    return max(positive)
+
+
+def _self_checked_statistical_quantity(
+    *,
+    raw_quantity: float,
+    baseline: float,
+    fresh_available_for_target: float,
+    incoming: float,
+    safety: float,
+    stock_date: date | None,
+    target_start: date,
+    shelf_life_days: int,
+) -> tuple[float, str]:
+    notes = []
+    checked_quantity = raw_quantity
+    available = fresh_available_for_target + incoming
+    expected_minimum = max(baseline + safety - available, 0)
+
+    if baseline > 0 and checked_quantity <= 0 and expected_minimum > 0:
+        checked_quantity = expected_minimum
+        notes.append(
+            "расчет был исправлен: при ненулевом спросе нельзя ставить 0, "
+            "если свежего остатка и уже заказанных поставок не хватает на период"
+        )
+
+    if stock_date and fresh_available_for_target > 0 and (target_start - stock_date).days >= shelf_life_days:
+        notes.append(
+            "проверить свежесть остатка: часть остатка попала к вычету, хотя дата остатка близка к пределу хранения"
+        )
+
+    if baseline == 0 and checked_quantity > 0:
+        notes.append("проверить расчет: заказ появился при нулевом ожидаемом спросе")
+
+    return checked_quantity, "; ".join(notes)
+
+
+def _month_over_month_trend(
+    db: Session,
+    product_id: int,
+    as_of: date,
+    first_sale_date: date | None,
+) -> tuple[float, bool, float, float, date, date, date, date]:
+    current_end = as_of
+    current_start = max(first_sale_date or as_of, as_of - timedelta(days=29))
+    current_days = max((current_end - current_start).days + 1, 1)
+    current_sales = _sum_sales(db, product_id, current_start, current_end)
+
+    previous_values = []
+    previous_sales = 0.0
+    previous_parts_total = 0.0
+    previous_start = current_start - timedelta(days=30)
+    previous_end = current_start - timedelta(days=1)
+    cursor_end = previous_end
+    index = 0
+    while first_sale_date and cursor_end >= first_sale_date:
+        cursor_start = max(first_sale_date, cursor_end - timedelta(days=29))
+        days = max((cursor_end - cursor_start).days + 1, 1)
+        if days >= 14:
+            sales = _sum_sales(db, product_id, cursor_start, cursor_end)
+            weight = 1 / (index + 1)
+            previous_values.append((sales / days, weight))
+            previous_parts_total += sales
+            previous_start = cursor_start
+        cursor_end = cursor_start - timedelta(days=1)
+        index += 1
+
+    if not previous_values:
+        return 1.0, False, current_sales, previous_sales, current_start, current_end, previous_start, previous_end
+    current_daily = current_sales / current_days
+    previous_daily = sum(value * weight for value, weight in previous_values if value > 0) / sum(
+        weight for value, weight in previous_values if value > 0
+    ) if any(value > 0 for value, _weight in previous_values) else 0.0
+    previous_sales = previous_daily * current_days
+    if previous_daily <= 0:
+        return 1.0, False, current_sales, previous_parts_total, current_start, current_end, previous_start, previous_end
+    trend = current_daily / previous_daily if previous_daily > 0 else 1.0
+    return max(0.4, min(trend, 2.5)), True, current_sales, previous_sales, current_start, current_end, previous_start, previous_end
+
+
+def _validated_ai_quantity(item: ForecastItem, value, *, allow_increase: bool = False) -> tuple[float, str]:
+    fallback = float(item.statistical_quantity)
+    if value is None:
+        return fallback, ""
+    try:
+        quantity = float(value)
+    except (TypeError, ValueError):
+        return fallback, "Самопроверка: AI вернул нечисловую рекомендацию, оставлен статистический расчет."
+
+    if fallback > 0 and quantity <= 0:
+        return fallback, "Самопроверка: AI вернул 0 при ненулевом статистическом расчете, оставлен статистический расчет."
+    if fallback > 0 and quantity < fallback * 0.7:
+        return fallback, "Самопроверка: AI слишком сильно снизил рекомендацию без расчетного основания, оставлен статистический расчет."
+    if fallback > 0 and not allow_increase and quantity > fallback * 1.3:
+        return fallback, "Самопроверка: AI слишком сильно увеличил рекомендацию без календарного режима, оставлен статистический расчет."
+    return max(quantity, 0.0), ""
 
 
 def _expected_next_receipt_date(
@@ -435,38 +660,71 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
         same_period_sales = _sum_sales(db, product.id, same_start_last_year, same_end_last_year)
         historical_leftover = _stock_on_date(db, product.id, same_end_last_year)
         historical_purchase_need = same_period_sales
+        trend_current_start = current_lookback_start
+        trend_current_end = current_lookback_end
+        trend_previous_start = previous_lookback_start
+        trend_previous_end = previous_lookback_end
         current_recent_sales = _sum_sales(db, product.id, current_lookback_start, current_lookback_end)
         previous_recent_values = []
         previous_recent_parts = []
+        history_offsets = _history_year_offsets(db, product.id, current_lookback_start.year)
         for index, (_offset, period_start, period_end) in enumerate(
-            _same_period_years(current_lookback_start, current_lookback_end)
+            _same_period_years(current_lookback_start, current_lookback_end, history_offsets)
         ):
-            weight = HISTORY_YEAR_WEIGHTS[index] if index < len(HISTORY_YEAR_WEIGHTS) else 0.0
+            weight = _history_weight(index)
             sold = _sum_sales(db, product.id, period_start, period_end)
             previous_recent_values.append((sold, weight))
             previous_recent_parts.append(f"{period_start.year}: {sold:.0f}")
         previous_recent_sales = _weighted_average(previous_recent_values)
-        trend = current_recent_sales / previous_recent_sales if previous_recent_sales > 0 else 1.0
+        has_trend_history = previous_recent_sales > 0
+        sales_stats = _sales_history_stats(db, product.id, calculation_as_of, period_days)
+        trend = current_recent_sales / previous_recent_sales if has_trend_history else 1.0
         trend = max(0.4, min(trend, 2.5))
-        observed_start, observed_end, observed_sales, observed_days = _sales_observation_window(
-            db,
-            product.id,
-            calculation_as_of,
-            current_lookback_start,
-        )
+        trend_basis = "year"
         if multi_year_sales > 0:
             baseline = multi_year_sales * trend
             baseline_source = "взвешенная история аналогичных периодов за последние годы с учетом тренда"
-        elif observed_sales > 0:
-            baseline = observed_sales / observed_days * period_days
-            if observed_days < 60:
+        elif sales_stats.total_sales > 0:
+            (
+                monthly_trend,
+                has_monthly_trend,
+                monthly_current_sales,
+                monthly_previous_sales,
+                monthly_current_start,
+                monthly_current_end,
+                monthly_previous_start,
+                monthly_previous_end,
+            ) = _month_over_month_trend(db, product.id, calculation_as_of, sales_stats.first_sale_date)
+            trend = monthly_trend
+            has_trend_history = has_monthly_trend
+            trend_basis = "month"
+            current_recent_sales = monthly_current_sales
+            previous_recent_sales = monthly_previous_sales
+            trend_current_start = monthly_current_start
+            trend_current_end = monthly_current_end
+            trend_previous_start = monthly_previous_start
+            trend_previous_end = monthly_previous_end
+            baseline = _short_history_baseline(sales_stats) * trend
+            if sales_stats.total_days < 60:
                 baseline_source = (
                     f"мало данных для анализа: нет истории за прошлые годы, "
-                    f"используем продажи с {observed_start.isoformat()} по {observed_end.isoformat()} "
-                    f"({observed_days} дн.)"
+                    f"используем всю доступную историю продаж с {sales_stats.first_sale_date.isoformat()} "
+                    f"по {calculation_as_of.isoformat()} ({sales_stats.total_days} дн.); "
+                    f"средний спрос на расчетный период: за неделю {sales_stats.weekly_average:.0f}, "
+                    f"за 30 дней {sales_stats.monthly_average:.0f}, "
+                    f"за весь период {sales_stats.period_average:.0f}; "
+                    f"месячный тренд: {trend:.2f}"
                 )
             else:
-                baseline_source = "нет истории за прошлые годы, используем средние недавние продажи"
+                baseline_source = (
+                    f"нет истории за прошлые годы, используем всю доступную историю продаж; "
+                    f"средний спрос на расчетный период: за неделю {sales_stats.weekly_average:.0f}, "
+                    f"за 30 дней {sales_stats.monthly_average:.0f}, "
+                    f"за весь период {sales_stats.period_average:.0f}; "
+                    f"месячный тренд: {trend:.2f}"
+                )
+            if sales_stats.spike_note:
+                baseline_source += f"; {sales_stats.spike_note}"
         else:
             baseline = 0
             baseline_source = "нет истории за прошлые годы и нет текущих продаж для расчета спроса"
@@ -500,8 +758,7 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
             calculation_as_of,
             current_lookback_start,
         )
-        reserve_until = next_receipt if next_receipt else target_start
-        reserve_until = max(reserve_until, target_start)
+        reserve_until = target_start
         bridge_days = max((reserve_until - calculation_as_of).days - 1, 0)
         bridge_need = reserve_daily_demand * bridge_days
         fresh_stock_at_next_receipt = _fresh_stock_surviving_until(
@@ -509,16 +766,21 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
             product.id,
             current_stock,
             calculation_as_of,
-            reserve_until,
+            target_start,
             shelf_life_days,
         )
-        incoming_before_target = _purchase_orders_sum(
-            db,
-            product.id,
-            calculation_as_of + timedelta(days=1),
-            target_start - timedelta(days=1),
-            calculation_as_of,
-        ) if bridge_days > 0 else 0.0
+        fresh_incoming_start = max(calculation_as_of + timedelta(days=1), target_start - timedelta(days=shelf_life_days - 1))
+        incoming_before_target = (
+            _purchase_orders_sum(
+                db,
+                product.id,
+                fresh_incoming_start,
+                target_start - timedelta(days=1),
+                calculation_as_of,
+            )
+            if bridge_days > 0 and fresh_incoming_start <= target_start - timedelta(days=1)
+            else 0.0
+        )
         fresh_available_for_target = max(fresh_stock_at_next_receipt + incoming_before_target - bridge_need, 0)
         incoming = _usable_incoming_orders_sum(
             db,
@@ -528,9 +790,18 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
             shelf_life_days,
             calculation_as_of,
         )
-        incoming = max(incoming - incoming_before_target, 0)
         safety = baseline * (settings.safety_stock_percent / 100)
         statistical_quantity = max(baseline - fresh_available_for_target - incoming + safety, 0)
+        statistical_quantity, self_check_note = _self_checked_statistical_quantity(
+            raw_quantity=statistical_quantity,
+            baseline=baseline,
+            fresh_available_for_target=fresh_available_for_target,
+            incoming=incoming,
+            safety=safety,
+            stock_date=stock_date,
+            target_start=target_start,
+            shelf_life_days=shelf_life_days,
+        )
         explanation = (
             f"Аналогичный период прошлого года: {same_period_sales:.0f}; "
             f"взвешенная история по годам: {multi_year_parts}; "
@@ -541,12 +812,23 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
             f"база рекомендации: {baseline_source}; "
             f"ожидаемый спрос: {baseline:.0f}; "
             f"коэффициент тренда: {trend:.2f} "
-            f"({current_recent_sales:.0f} за {current_lookback_start.isoformat()}-{current_lookback_end.isoformat()} / "
-            f"{previous_recent_sales:.0f} средневзвешенно по прошлым годам: {', '.join(previous_recent_parts)}); "
+            + (
+                f"({current_recent_sales:.0f} за {current_lookback_start.isoformat()}-{current_lookback_end.isoformat()} / "
+                f"{previous_recent_sales:.0f} средневзвешенно по прошлым годам: {', '.join(previous_recent_parts)}); "
+                if has_trend_history and trend_basis == "year"
+                else (
+                    f"месячный тренд {trend:.2f}: {current_recent_sales:.0f} шт. "
+                    f"за {trend_current_start.isoformat()}-{trend_current_end.isoformat()} / "
+                    f"{previous_recent_sales:.0f} шт. за {trend_previous_start.isoformat()}-{trend_previous_end.isoformat()}; "
+                    if has_trend_history
+                    else "тренд не рассчитывается, потому что пока недостаточно предыдущего месяца продаж; "
+                )
+            )
+            +
             f"остаток на дату расчета: {current_stock:.0f}; "
             f"свежий остаток на дату расчета: {fresh_stock_now:.0f}; "
-            f"из него доживет до ожидаемого следующего прихода: {fresh_stock_at_next_receipt:.0f}; "
-            f"прогноз продаж до ожидаемого следующего прихода ({reserve_until.isoformat()}): {bridge_need:.0f} "
+            f"из него доживет до начала расчетного периода: {fresh_stock_at_next_receipt:.0f}; "
+            f"прогноз продаж до начала расчетного периода ({reserve_until.isoformat()}): {bridge_need:.0f} "
             f"({reserve_daily_demand:.1f} шт./день, максимум из текущего темпа и спроса расчетного периода); "
             f"к вычету из заказа остается: {fresh_available_for_target:.0f}; "
             f"следующий приход товара: {next_receipt.isoformat() if next_receipt else 'нет данных'} "
@@ -554,6 +836,8 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
             f"срок хранения для позиции: {shelf_life_days} дн.; "
             f"уже заказано к свежей поставке по данным поступлений: {incoming:.0f}; страховой запас: {safety:.0f}."
         )
+        if self_check_note:
+            explanation = f"{explanation} Самопроверка системы: {self_check_note}."
         items.append(
             ForecastItem(
                 product=product,
@@ -573,10 +857,10 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
                 trend_coefficient=trend,
                 trend_current_sales=current_recent_sales,
                 trend_previous_sales=previous_recent_sales,
-                trend_current_start=current_lookback_start,
-                trend_current_end=current_lookback_end,
-                trend_previous_start=previous_lookback_start,
-                trend_previous_end=previous_lookback_end,
+                trend_current_start=trend_current_start,
+                trend_current_end=trend_current_end,
+                trend_previous_start=trend_previous_start,
+                trend_previous_end=trend_previous_end,
                 safety_stock=safety,
                 explanation=explanation,
             )
@@ -617,13 +901,22 @@ def save_recommendation_run(
     for item in items:
         primary = primary_by_name.get(item.product.purchase_name, {})
         event = event_by_name.get(item.product.purchase_name, {})
-        primary_quantity = float(primary.get("recommended_quantity") or item.statistical_quantity)
-        event_quantity = event.get("recommended_quantity")
+        primary_quantity, primary_check_note = _validated_ai_quantity(
+            item,
+            primary.get("recommended_quantity"),
+            allow_increase=False,
+        )
+        event_quantity_raw = event.get("recommended_quantity")
+        event_quantity, event_check_note = _validated_ai_quantity(
+            item,
+            event_quantity_raw,
+            allow_increase=True,
+        ) if event_quantity_raw is not None else (None, "")
         calendar_adjustment = _calendar_adjustment_percent(item.product, calendar_events, item)
         forced_calendar_adjustment = False
         if calendar_adjustment > 0 and primary_quantity > 0:
             calendar_quantity = ceil(primary_quantity * (1 + calendar_adjustment / 100))
-            if event_quantity is None or float(event_quantity) < calendar_quantity:
+            if event_quantity is None or event_quantity < calendar_quantity:
                 event_quantity = calendar_quantity
                 forced_calendar_adjustment = True
         final_quantity = float(event_quantity if event_quantity is not None else primary_quantity)
@@ -648,6 +941,9 @@ def save_recommendation_run(
                 f"{explanation} Календарная поправка: +{calendar_adjustment:.0f}% "
                 f"с учетом событий периода ({names})."
             )
+        ai_check_notes = " ".join(note for note in (primary_check_note, event_check_note) if note)
+        if ai_check_notes:
+            explanation = f"{explanation} {ai_check_notes}"
         db.add(
             RecommendationItem(
                 run_id=run.id,

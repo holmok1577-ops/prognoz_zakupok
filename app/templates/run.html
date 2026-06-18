@@ -100,13 +100,27 @@
         </div>
       </dl>
       <p class="footnote">
-        * Тренд = продажи за последние недели перед расчетным периодом в этом году /
-        средневзвешенные продажи за такие же периоды прошлых лет. В этом расчете:
-        {{ "%.0f"|format(item.trend_current_sales) }} шт.
-        за {{ item.trend_current_start.strftime("%d.%m.%Y") if item.trend_current_start else "нет" }} -
-        {{ item.trend_current_end.strftime("%d.%m.%Y") if item.trend_current_end else "нет" }}
-        / {{ "%.0f"|format(item.trend_previous_sales) }} шт. по прошлым годам
-        = {{ "%.2f"|format(item.trend_coefficient) }}.
+        {% if item.historical_sold == 0 and item.trend_previous_sales > 0 %}
+          * Месячный тренд = продажи за последние доступные недели / продажи за предыдущий сопоставимый период.
+          В этом расчете: {{ "%.0f"|format(item.trend_current_sales) }} шт.
+          за {{ item.trend_current_start.strftime("%d.%m.%Y") if item.trend_current_start else "нет" }} -
+          {{ item.trend_current_end.strftime("%d.%m.%Y") if item.trend_current_end else "нет" }}
+          / {{ "%.0f"|format(item.trend_previous_sales) }} шт.
+          за {{ item.trend_previous_start.strftime("%d.%m.%Y") if item.trend_previous_start else "нет" }} -
+          {{ item.trend_previous_end.strftime("%d.%m.%Y") if item.trend_previous_end else "нет" }}
+          = {{ "%.2f"|format(item.trend_coefficient) }}.
+        {% elif item.trend_previous_sales > 0 %}
+          * Тренд = продажи за последние недели перед расчетным периодом в этом году /
+          средневзвешенные продажи за такие же периоды прошлых лет. В этом расчете:
+          {{ "%.0f"|format(item.trend_current_sales) }} шт.
+          за {{ item.trend_current_start.strftime("%d.%m.%Y") if item.trend_current_start else "нет" }} -
+          {{ item.trend_current_end.strftime("%d.%m.%Y") if item.trend_current_end else "нет" }}
+          / {{ "%.0f"|format(item.trend_previous_sales) }} шт. по прошлым годам
+          = {{ "%.2f"|format(item.trend_coefficient) }}.
+        {% else %}
+          * Тренд пока не рассчитывается: для помесячного сравнения еще недостаточно предыдущего периода продаж.
+          Для рекомендации используется доступная текущая история продаж и ручная проверка позиции.
+        {% endif %}
       </p>
     </article>
     {% endfor %}

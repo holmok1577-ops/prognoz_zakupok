@@ -5,7 +5,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import Base
 from app.models import Product, PurchaseOrder, RecommendationItem, RecommendationRun, Sale, Stock
-from app.services.forecast import build_statistical_forecast, evaluate_against_actual_purchases, save_recommendation_run
+from app.services.forecast import ForecastItem, build_statistical_forecast, evaluate_against_actual_purchases, save_recommendation_run
 
 
 def test_statistical_forecast_uses_last_year_sales_and_stock():
@@ -381,7 +381,7 @@ def test_statistical_forecast_subtracts_only_fresh_stock_confirmed_by_recent_rec
     assert items[0].statistical_quantity == 65
 
 
-def test_statistical_forecast_reserves_stock_until_expected_next_receipt():
+def test_statistical_forecast_subtracts_fresh_stock_available_at_target_start():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
     session = sessionmaker(bind=engine)()
@@ -436,7 +436,7 @@ def test_statistical_forecast_reserves_stock_until_expected_next_receipt():
 
     items = build_statistical_forecast(session, date(2026, 4, 1), date(2026, 4, 8), "Гвоздика")
 
-    assert 0 < items[0].usable_stock < 1000
+    assert items[0].usable_stock == 1000
     assert items[0].statistical_quantity == 0
 
 
@@ -675,3 +675,144 @@ def test_short_history_uses_observed_sales_window_instead_of_full_lookback():
     assert items[0].statistical_quantity == 74
     assert "мало данных для анализа" in items[0].explanation
     assert "нет истории за прошлые годы" in items[0].explanation
+
+
+def test_short_history_does_not_subtract_stock_that_will_not_survive_target_period():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    today = date.today()
+    product = Product(
+        onec_id="kimberly_60",
+        purchase_name="Кимберли 60",
+        sales_category="Роза",
+        flower_type="rose",
+    )
+    session.add(product)
+    session.flush()
+    for index in range(7):
+        session.add(
+            Sale(
+                sale_date=today - timedelta(days=6 - index),
+                product_id=product.id,
+                quantity=75 / 7,
+                revenue=1000,
+                source_row_hash=f"kimberly-sale-{index}",
+            )
+        )
+    session.add_all(
+        [
+            Stock(stock_date=today - timedelta(days=1), product_id=product.id, quantity=200),
+            PurchaseOrder(
+                order_date=today - timedelta(days=1),
+                delivery_date=today - timedelta(days=1),
+                product_id=product.id,
+                quantity_ordered=200,
+                quantity_received=200,
+                source_row_hash="kimberly-receipt",
+            ),
+        ]
+    )
+    session.commit()
+
+    items = build_statistical_forecast(session, today + timedelta(days=21), today + timedelta(days=27), "Кимберли 60")
+
+    assert len(items) == 1
+    assert round(items[0].baseline_demand) == 75
+    assert items[0].current_stock == 200
+    assert items[0].usable_stock == 0
+    assert items[0].statistical_quantity == 79
+    assert "тренд не рассчитывается" in items[0].explanation
+
+
+def test_short_history_uses_month_over_month_trend_before_yearly_history_exists():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    today = date.today()
+    target_start = today + timedelta(days=7)
+    product = Product(
+        onec_id="new_monthly_trend",
+        purchase_name="Кимберли 60",
+        sales_category="Роза",
+        flower_type="rose",
+    )
+    session.add(product)
+    session.flush()
+    session.add_all(
+        [
+            Sale(
+                sale_date=today - timedelta(days=45),
+                product_id=product.id,
+                quantity=60,
+                revenue=6000,
+                source_row_hash="previous-month-sale",
+            ),
+            Sale(
+                sale_date=today - timedelta(days=5),
+                product_id=product.id,
+                quantity=120,
+                revenue=12000,
+                source_row_hash="current-month-sale",
+            ),
+        ]
+    )
+    session.commit()
+
+    items = build_statistical_forecast(session, target_start, target_start + timedelta(days=6), "Кимберли 60")
+
+    assert len(items) == 1
+    assert items[0].historical_sold == 0
+    assert items[0].trend_coefficient > 1
+    assert items[0].baseline_demand > 28
+    assert "месячный тренд" in items[0].explanation
+
+
+def test_ai_quantity_self_check_keeps_statistical_quantity_when_ai_returns_zero():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    product = Product(onec_id="ai_check", purchase_name="Кимберли 60", sales_category="Роза", flower_type="rose")
+    session.add(product)
+    session.flush()
+    session.commit()
+    forecast_item = ForecastItem(
+        product=product,
+        statistical_quantity=50,
+        current_stock=0,
+        usable_stock=0,
+        stock_snapshot_date=None,
+        stock_age_days=None,
+        historical_sold=0,
+        historical_leftover=0,
+        historical_purchased=0,
+        historical_purchase_need=0,
+        incoming_orders=0,
+        expected_next_receipt_date=None,
+        expected_next_receipt_note="нет данных",
+        baseline_demand=48,
+        trend_coefficient=1,
+        trend_current_sales=48,
+        trend_previous_sales=0,
+        trend_current_start=date.today() - timedelta(days=6),
+        trend_current_end=date.today(),
+        trend_previous_start=date.today() - timedelta(days=36),
+        trend_previous_end=date.today() - timedelta(days=7),
+        safety_stock=2,
+        explanation="test",
+    )
+
+    saved = save_recommendation_run(
+        session,
+        target_start=date.today(),
+        target_end=date.today() + timedelta(days=6),
+        category="Роза",
+        items=[forecast_item],
+        primary_ai={"primary_items": [{"purchase_name": "Кимберли 60", "recommended_quantity": 0, "recommendation_text": "0"}]},
+    )
+
+    assert saved.items[0].final_quantity == 50
+    assert "AI вернул 0" in saved.items[0].explanation
