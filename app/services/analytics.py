@@ -360,6 +360,12 @@ def build_analytics_data(db: Session, category: str, start: date, end: date) -> 
         "stock_snapshots": stock_snapshots,
         "store_stock": store_stock,
         "attention": attention,
+        "store_sales_missing_reason": (
+            "В загруженных продажах нет привязки к магазинам. "
+            "Чтобы построить график и таблицу 'Кто сколько продает', нужен файл продаж с магазинами/точками."
+            if not store_sales and sum(row["quantity"] for row in daily_sales) > 0
+            else ""
+        ),
         "summary": {
             "sales_total": sum(row["quantity"] for row in daily_sales),
             "stock_latest": latest_stock,

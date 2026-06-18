@@ -560,6 +560,24 @@ button:not(:disabled):hover,
   margin-top: 3px;
 }
 
+.subsection {
+  margin-top: 14px;
+}
+
+.subsection h3 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.compact-grid {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.compact-grid dd {
+  font-size: 16px;
+}
+
 .footnote {
   border-top: 1px solid var(--line);
   color: var(--muted);

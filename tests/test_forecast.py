@@ -770,6 +770,42 @@ def test_short_history_uses_month_over_month_trend_before_yearly_history_exists(
     assert "месячный тренд" in items[0].explanation
 
 
+def test_short_history_splits_available_history_when_less_than_two_months():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    today = date.today()
+    target_start = today + timedelta(days=7)
+    product = Product(
+        onec_id="new_split_trend",
+        purchase_name="Бомбастик куст. 50",
+        sales_category="Роза",
+        flower_type="rose",
+    )
+    session.add(product)
+    session.flush()
+    for offset in range(34):
+        quantity = 5 if offset < 17 else 15
+        session.add(
+            Sale(
+                sale_date=today - timedelta(days=33 - offset),
+                product_id=product.id,
+                quantity=quantity,
+                revenue=quantity * 100,
+                source_row_hash=f"split-sale-{offset}",
+            )
+        )
+    session.commit()
+
+    items = build_statistical_forecast(session, target_start, target_start + timedelta(days=6), "Бомбастик куст. 50")
+
+    assert len(items) == 1
+    assert items[0].trend_coefficient > 1
+    assert items[0].trend_previous_sales > 0
+    assert "месячный тренд" in items[0].explanation
+
+
 def test_ai_quantity_self_check_keeps_statistical_quantity_when_ai_returns_zero():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)
@@ -801,6 +837,13 @@ def test_ai_quantity_self_check_keeps_statistical_quantity_when_ai_returns_zero(
         trend_current_end=date.today(),
         trend_previous_start=date.today() - timedelta(days=36),
         trend_previous_end=date.today() - timedelta(days=7),
+        short_history_first_sale_date=date.today() - timedelta(days=6),
+        short_history_days=7,
+        short_history_last_7_sales=48,
+        short_history_last_30_sales=48,
+        short_history_weekly_average=48,
+        short_history_monthly_average=48,
+        short_history_period_average=48,
         safety_stock=2,
         explanation="test",
     )

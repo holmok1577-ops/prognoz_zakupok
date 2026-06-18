@@ -37,6 +37,17 @@ def _forecast_payload(items: list[ForecastItem]) -> list[dict]:
             "trend_previous_sales": round(item.trend_previous_sales, 2),
             "trend_current_period": [item.trend_current_start.isoformat(), item.trend_current_end.isoformat()],
             "trend_previous_period": [item.trend_previous_start.isoformat(), item.trend_previous_end.isoformat()],
+            "short_history": {
+                "first_sale_date": item.short_history_first_sale_date.isoformat()
+                if item.short_history_first_sale_date
+                else None,
+                "days": item.short_history_days,
+                "last_7_sales": round(item.short_history_last_7_sales, 2),
+                "last_30_sales": round(item.short_history_last_30_sales, 2),
+                "weekly_average_for_target_period": round(item.short_history_weekly_average, 2),
+                "monthly_average_for_target_period": round(item.short_history_monthly_average, 2),
+                "period_average_for_target_period": round(item.short_history_period_average, 2),
+            },
             "current_stock": round(item.current_stock, 2),
             "usable_stock": round(item.usable_stock, 2),
             "stock_snapshot_date": item.stock_snapshot_date.isoformat() if item.stock_snapshot_date else None,

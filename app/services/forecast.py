@@ -189,6 +189,13 @@ class ForecastItem:
     trend_current_end: date
     trend_previous_start: date
     trend_previous_end: date
+    short_history_first_sale_date: date | None
+    short_history_days: int
+    short_history_last_7_sales: float
+    short_history_last_30_sales: float
+    short_history_weekly_average: float
+    short_history_monthly_average: float
+    short_history_period_average: float
     safety_stock: float
     explanation: str
 
@@ -546,6 +553,43 @@ def _month_over_month_trend(
         index += 1
 
     if not previous_values:
+        total_days = max((as_of - first_sale_date).days + 1, 1) if first_sale_date else 0
+        if first_sale_date and total_days >= 14:
+            split_days = total_days // 2
+            previous_start = first_sale_date
+            previous_end = first_sale_date + timedelta(days=split_days - 1)
+            current_start = previous_end + timedelta(days=1)
+            current_end = as_of
+            previous_days = max((previous_end - previous_start).days + 1, 1)
+            current_days = max((current_end - current_start).days + 1, 1)
+            previous_sales = _sum_sales(db, product_id, previous_start, previous_end)
+            current_sales = _sum_sales(db, product_id, current_start, current_end)
+            previous_daily = previous_sales / previous_days
+            current_daily = current_sales / current_days
+            active_days = db.scalar(
+                select(func.count()).select_from(
+                    select(Sale.sale_date)
+                    .where(
+                        Sale.product_id == product_id,
+                        Sale.sale_date >= first_sale_date,
+                        Sale.sale_date <= as_of,
+                    )
+                    .group_by(Sale.sale_date)
+                    .subquery()
+                )
+            ) or 0
+            if previous_daily > 0 and active_days >= 3:
+                trend = current_daily / previous_daily
+                return (
+                    max(0.4, min(trend, 2.5)),
+                    True,
+                    current_sales,
+                    previous_sales,
+                    current_start,
+                    current_end,
+                    previous_start,
+                    previous_end,
+                )
         return 1.0, False, current_sales, previous_sales, current_start, current_end, previous_start, previous_end
     current_daily = current_sales / current_days
     previous_daily = sum(value * weight for value, weight in previous_values if value > 0) / sum(
@@ -861,6 +905,13 @@ def build_statistical_forecast(db: Session, target_start: date, target_end: date
                 trend_current_end=trend_current_end,
                 trend_previous_start=trend_previous_start,
                 trend_previous_end=trend_previous_end,
+                short_history_first_sale_date=sales_stats.first_sale_date,
+                short_history_days=sales_stats.total_days,
+                short_history_last_7_sales=sales_stats.last_7_sales,
+                short_history_last_30_sales=sales_stats.last_30_sales,
+                short_history_weekly_average=sales_stats.weekly_average,
+                short_history_monthly_average=sales_stats.monthly_average,
+                short_history_period_average=sales_stats.period_average,
                 safety_stock=safety,
                 explanation=explanation,
             )
@@ -970,6 +1021,13 @@ def save_recommendation_run(
                 trend_current_end=item.trend_current_end,
                 trend_previous_start=item.trend_previous_start,
                 trend_previous_end=item.trend_previous_end,
+                short_history_first_sale_date=item.short_history_first_sale_date,
+                short_history_days=item.short_history_days,
+                short_history_last_7_sales=item.short_history_last_7_sales,
+                short_history_last_30_sales=item.short_history_last_30_sales,
+                short_history_weekly_average=item.short_history_weekly_average,
+                short_history_monthly_average=item.short_history_monthly_average,
+                short_history_period_average=item.short_history_period_average,
                 safety_stock=item.safety_stock,
                 explanation=explanation,
             )

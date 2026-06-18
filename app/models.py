@@ -125,6 +125,13 @@ class RecommendationItem(Base):
     trend_current_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     trend_previous_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     trend_previous_end: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    short_history_first_sale_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    short_history_days: Mapped[int] = mapped_column(Integer, default=0)
+    short_history_last_7_sales: Mapped[float] = mapped_column(Float, default=0.0)
+    short_history_last_30_sales: Mapped[float] = mapped_column(Float, default=0.0)
+    short_history_weekly_average: Mapped[float] = mapped_column(Float, default=0.0)
+    short_history_monthly_average: Mapped[float] = mapped_column(Float, default=0.0)
+    short_history_period_average: Mapped[float] = mapped_column(Float, default=0.0)
     safety_stock: Mapped[float] = mapped_column(Float)
     explanation: Mapped[str] = mapped_column(Text, default="")
 

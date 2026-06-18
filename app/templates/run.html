@@ -80,12 +80,12 @@
         <div><dt>Ожидаемый спрос</dt><dd>{{ "%.0f"|format(item.baseline_demand) }}</dd></div>
         <div><dt>Страховой запас</dt><dd>{{ "%.0f"|format(item.safety_stock) }}</dd></div>
         <div>
-          <dt>Тренд этого года</dt>
+          <dt>{% if item.historical_sold == 0 %}Текущий период продаж{% else %}Тренд этого года{% endif %}</dt>
           <dd>{{ "%.0f"|format(item.trend_current_sales) }}</dd>
           <small>{{ item.trend_current_start.strftime("%d.%m.%Y") if item.trend_current_start else "нет" }} - {{ item.trend_current_end.strftime("%d.%m.%Y") if item.trend_current_end else "нет" }}</small>
         </div>
         <div>
-          <dt>Тренд прошлого года</dt>
+          <dt>{% if item.historical_sold == 0 %}Предыдущий период продаж{% else %}Тренд прошлых лет{% endif %}</dt>
           <dd>{{ "%.0f"|format(item.trend_previous_sales) }}</dd>
           <small>{{ item.trend_previous_start.strftime("%d.%m.%Y") if item.trend_previous_start else "нет" }} - {{ item.trend_previous_end.strftime("%d.%m.%Y") if item.trend_previous_end else "нет" }}</small>
         </div>
@@ -99,9 +99,26 @@
           <small>{{ item.expected_next_receipt_note or "" }}</small>
         </div>
       </dl>
+      {% if item.historical_sold == 0 %}
+      <div class="subsection">
+        <h3>Короткая история</h3>
+        <dl class="detail-grid compact-grid">
+          <div>
+            <dt>Первая продажа</dt>
+            <dd>{{ item.short_history_first_sale_date.strftime("%d.%m.%Y") if item.short_history_first_sale_date else "нет" }}</dd>
+          </div>
+          <div><dt>Дней истории</dt><dd>{{ item.short_history_days or 0 }}</dd></div>
+          <div><dt>Продано за 7 дней</dt><dd>{{ "%.0f"|format(item.short_history_last_7_sales or 0) }}</dd></div>
+          <div><dt>Продано за 30 дней</dt><dd>{{ "%.0f"|format(item.short_history_last_30_sales or 0) }}</dd></div>
+          <div><dt>Среднее по неделе</dt><dd>{{ "%.0f"|format(item.short_history_weekly_average or 0) }}</dd></div>
+          <div><dt>Среднее по 30 дням</dt><dd>{{ "%.0f"|format(item.short_history_monthly_average or 0) }}</dd></div>
+          <div><dt>Среднее за весь период</dt><dd>{{ "%.0f"|format(item.short_history_period_average or 0) }}</dd></div>
+        </dl>
+      </div>
+      {% endif %}
       <p class="footnote">
         {% if item.historical_sold == 0 and item.trend_previous_sales > 0 %}
-          * Месячный тренд = продажи за последние доступные недели / продажи за предыдущий сопоставимый период.
+          * Тренд по доступной истории = продажи за последнюю часть доступного периода / продажи за предыдущий сопоставимый период.
           В этом расчете: {{ "%.0f"|format(item.trend_current_sales) }} шт.
           за {{ item.trend_current_start.strftime("%d.%m.%Y") if item.trend_current_start else "нет" }} -
           {{ item.trend_current_end.strftime("%d.%m.%Y") if item.trend_current_end else "нет" }}

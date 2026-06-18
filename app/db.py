@@ -57,6 +57,13 @@ def _apply_lightweight_migrations() -> None:
             "trend_current_end": "DATE",
             "trend_previous_start": "DATE",
             "trend_previous_end": "DATE",
+            "short_history_first_sale_date": "DATE",
+            "short_history_days": "INTEGER DEFAULT 0",
+            "short_history_last_7_sales": "FLOAT DEFAULT 0",
+            "short_history_last_30_sales": "FLOAT DEFAULT 0",
+            "short_history_weekly_average": "FLOAT DEFAULT 0",
+            "short_history_monthly_average": "FLOAT DEFAULT 0",
+            "short_history_period_average": "FLOAT DEFAULT 0",
             "expected_next_receipt_date": "DATE",
             "expected_next_receipt_note": "VARCHAR(255) DEFAULT ''",
         }.items():
