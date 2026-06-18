@@ -830,6 +830,48 @@ def test_short_history_splits_available_history_when_less_than_two_months():
     assert "месячный тренд" in items[0].explanation
 
 
+def test_short_history_weekly_average_uses_non_empty_history_weeks():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    session = sessionmaker(bind=engine)()
+
+    today = date.today()
+    target_start = today + timedelta(days=7)
+    product = Product(
+        onec_id="quiet_recent_week",
+        purchase_name="Кимберли 60",
+        sales_category="Роза",
+        flower_type="rose",
+    )
+    session.add(product)
+    session.flush()
+    session.add_all(
+        [
+            Sale(
+                sale_date=today - timedelta(days=20),
+                product_id=product.id,
+                quantity=100,
+                revenue=10000,
+                source_row_hash="quiet-week-sale-1",
+            ),
+            Sale(
+                sale_date=today - timedelta(days=15),
+                product_id=product.id,
+                quantity=125,
+                revenue=12500,
+                source_row_hash="quiet-week-sale-2",
+            ),
+        ]
+    )
+    session.commit()
+
+    items = build_statistical_forecast(session, target_start, target_start + timedelta(days=6), "Кимберли 60")
+
+    assert len(items) == 1
+    assert items[0].short_history_last_7_sales == 0
+    assert items[0].short_history_weekly_average > 0
+
+
 def test_ai_quantity_self_check_keeps_statistical_quantity_when_ai_returns_zero():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     Base.metadata.create_all(bind=engine)

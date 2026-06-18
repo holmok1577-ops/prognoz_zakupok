@@ -61,7 +61,20 @@ def health() -> dict[str, str]:
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
-    products_count = len(_products_for_query(db, settings.mvp_product_category))
+    has_product_data = or_(
+        exists(select(Sale.id).where(Sale.product_id == Product.id)),
+        exists(select(Stock.id).where(Stock.product_id == Product.id)),
+        exists(select(PurchaseOrder.id).where(PurchaseOrder.product_id == Product.id)),
+    )
+    products_count = (
+        db.scalar(
+            select(func.count(Product.id)).where(
+                Product.active.is_(True),
+                has_product_data,
+            )
+        )
+        or 0
+    )
     sales_count = db.scalar(select(func.count(Sale.id))) or 0
     stocks_count = db.scalar(select(func.count(Stock.id))) or 0
     purchases_count = db.scalar(select(func.count(PurchaseOrder.id))) or 0
@@ -89,15 +102,10 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             db.scalars(
                 select(Product.purchase_name).where(
                     Product.active.is_(True),
-                    or_(
-                        exists(select(Sale.id).where(Sale.product_id == Product.id)),
-                        exists(select(Stock.id).where(Stock.product_id == Product.id)),
-                        exists(select(PurchaseOrder.id).where(PurchaseOrder.product_id == Product.id)),
-                    ),
+                    has_product_data,
                 )
             )
         )
-        | categories
     )
     default_start, default_end = _default_forecast_period()
     return templates.TemplateResponse(

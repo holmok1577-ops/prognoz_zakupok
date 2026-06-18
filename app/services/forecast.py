@@ -421,7 +421,6 @@ def _sales_history_stats(db: Session, product_id: int, as_of: date, period_days:
     last_30_days = max((as_of - last_30_start).days + 1, 1)
     last_7_sales = _sum_sales(db, product_id, last_7_start, as_of)
     last_30_sales = _sum_sales(db, product_id, last_30_start, as_of)
-    weekly_average = last_7_sales / last_7_days * period_days
     monthly_average = last_30_sales / last_30_days * period_days
     period_average = total_sales / total_days * period_days
 
@@ -437,6 +436,21 @@ def _sales_history_stats(db: Session, product_id: int, as_of: date, period_days:
             .order_by(Sale.sale_date)
         )
     )
+    weekly_rates = []
+    chunk_start = first_sale_date
+    while chunk_start <= as_of:
+        chunk_end = min(chunk_start + timedelta(days=6), as_of)
+        chunk_days = max((chunk_end - chunk_start).days + 1, 1)
+        chunk_sales = sum(
+            float(row.quantity or 0)
+            for row in daily_rows
+            if chunk_start <= row.sale_date <= chunk_end
+        )
+        if chunk_sales > 0:
+            weekly_rates.append(chunk_sales / chunk_days * period_days)
+        chunk_start = chunk_end + timedelta(days=1)
+    weekly_average = sum(weekly_rates) / len(weekly_rates) if weekly_rates else 0.0
+
     spike_note = ""
     positive_days = [float(row.quantity or 0) for row in daily_rows if float(row.quantity or 0) > 0]
     if len(positive_days) >= 3:
@@ -487,7 +501,7 @@ def _sales_history_stats(db: Session, product_id: int, as_of: date, period_days:
 
 def _short_history_baseline(stats: SalesHistoryStats) -> float:
     candidates = [stats.period_average]
-    if stats.total_days >= 7:
+    if stats.total_days >= 7 and stats.last_7_sales > 0:
         candidates.append(stats.weekly_average)
     if stats.total_days >= 30:
         candidates.append(stats.monthly_average)
