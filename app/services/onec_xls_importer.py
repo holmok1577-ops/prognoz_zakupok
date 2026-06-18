@@ -140,6 +140,8 @@ def import_onec_movements_xls_as_purchases(db: Session, file: BinaryIO) -> int:
     if header_row is None:
         raise ValueError("Не найден заголовок 'Регистратор' в отчете движений.")
     incoming_col = _find_movement_col(sheet, header_row + 1, "Приход")
+    if incoming_col is None and _cell_text(sheet, header_row + 1, 0) == "Номенклатура":
+        return _import_register_rows_as_purchases(db, sheet, header_row)
     if incoming_col is None:
         raise ValueError("Не найдена колонка 'Приход' в отчете движений.")
     final_stock_col = _find_movement_col(sheet, header_row + 1, "Конечный остаток")
@@ -188,6 +190,51 @@ def import_onec_movements_xls_as_purchases(db: Session, file: BinaryIO) -> int:
     purchases_count = import_purchases_rows(db, purchase_rows)
     stocks_count = import_stocks_rows(db, stock_rows)
     return purchases_count + stocks_count
+
+
+def _import_register_rows_as_purchases(db: Session, sheet, header_row: int) -> int:
+    quantity_col = _total_quantity_col(sheet, header_row)
+    if quantity_col is None:
+        raise ValueError("Не найдена итоговая колонка 'Количество' в отчете поступлений.")
+
+    purchase_rows = []
+    current_registrar = ""
+    current_date = None
+    is_receipt_document = False
+    for row_idx in range(header_row + 2, sheet.nrows):
+        first = _cell_text(sheet, row_idx, 0)
+        if not first:
+            continue
+        movement_date = _date_from_registrar(first)
+        if movement_date:
+            current_registrar = first
+            current_date = movement_date
+            lowered = first.lower()
+            is_receipt_document = (
+                lowered.startswith("поступление товаров")
+                or lowered.startswith("оприходование товаров")
+            )
+            continue
+        if not current_date or not is_receipt_document:
+            continue
+        quantity = _cell_float(sheet, row_idx, quantity_col)
+        if quantity == 0:
+            continue
+        product_name = first
+        purchase_rows.append(
+            {
+                "order_date": current_date.isoformat(),
+                "delivery_date": current_date.isoformat(),
+                "product_id_1c": product_name,
+                "product_name": product_name,
+                "category_name": _sales_category_for_name(product_name),
+                "quantity_ordered": quantity,
+                "quantity_received": quantity,
+                "supplier": current_registrar.split(" от ", 1)[0],
+                "source_line": f"{row_idx}:{current_registrar}",
+            }
+        )
+    return import_purchases_rows(db, purchase_rows)
 
 
 def _first_sheet(file: BinaryIO):
@@ -296,6 +343,19 @@ def _store_columns(sheet, header_row: int) -> list[tuple[int, str]]:
             continue
         stores.append((col_idx, name))
     return stores
+
+
+def _total_quantity_col(sheet, header_row: int) -> int | None:
+    quantity_cols = []
+    for col_idx in range(1, sheet.ncols):
+        name = _cell_text(sheet, header_row, col_idx)
+        metric = _cell_text(sheet, header_row + 1, col_idx)
+        if metric != "Количество":
+            continue
+        if name == "Итого":
+            return col_idx
+        quantity_cols.append(col_idx)
+    return quantity_cols[-1] if quantity_cols else None
 
 
 def _find_movement_col(sheet, row_idx: int, header: str) -> int | None:
