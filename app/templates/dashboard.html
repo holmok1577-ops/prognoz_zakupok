@@ -3,7 +3,7 @@
 <section class="hero">
   <div>
     <h1>Прогноз закупки</h1>
-    <p>Загрузите данные из 1С автоматически или CSV-файлами, затем сформируйте рекомендацию для категории {{ settings.mvp_product_category }}.</p>
+    <p>Загрузите данные из 1С автоматически или XLS-файлами, затем сформируйте рекомендацию по нужной номенклатуре.</p>
   </div>
   <div class="stats">
     <div><strong>{{ products_count }}</strong><span>позиций</span></div>
@@ -74,33 +74,10 @@
     </form>
   </div>
 
-  <div class="panel">
-    <h2>Импорт CSV</h2>
-    <form action="/import/products" method="post" enctype="multipart/form-data">
-      <label>Номенклатура</label>
-      <input type="file" name="file" accept=".csv" required>
-      <button>Загрузить</button>
-    </form>
-    <form action="/import/sales" method="post" enctype="multipart/form-data">
-      <label>Продажи</label>
-      <input type="file" name="file" accept=".csv" required>
-      <button>Загрузить</button>
-    </form>
-    <form action="/import/stocks" method="post" enctype="multipart/form-data">
-      <label>Остатки</label>
-      <input type="file" name="file" accept=".csv" required>
-      <button>Загрузить</button>
-    </form>
-    <form action="/import/purchases" method="post" enctype="multipart/form-data">
-      <label>Реальные закупки</label>
-      <input type="file" name="file" accept=".csv" required>
-      <button>Загрузить</button>
-    </form>
-  </div>
-
-  <div class="panel">
+  <div class="panel forecast-panel">
     <h2>Сформировать прогноз</h2>
     <form
+      class="forecast-form"
       action="/forecast"
       method="post"
       data-loading-message="Ожидайте, идет расчет рекомендации. Это может занять до минуты, если включен календарь событий."

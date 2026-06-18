@@ -111,3 +111,4 @@ def test_dashboard_counts_all_products_with_data_and_keeps_forecast_input_empty(
     assert "<strong>2</strong><span>позиций</span>" in response.text
     assert 'placeholder="Начните вводить название номенклатуры"' in response.text
     assert 'value="Роза"' not in response.text
+    assert "Импорт CSV" not in response.text

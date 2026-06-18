@@ -136,9 +136,13 @@ h2 {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 20px;
   margin-bottom: 20px;
+}
+
+.forecast-panel {
+  grid-column: span 2;
 }
 
 .quick-links,
@@ -266,6 +270,10 @@ form {
   border-top: 1px solid var(--line);
 }
 
+.forecast-form {
+  grid-template-columns: minmax(120px, 0.7fr) minmax(210px, 1fr);
+}
+
 form:first-of-type {
   border-top: 0;
 }
@@ -309,6 +317,11 @@ input[type="text"] {
   padding: 9px 10px;
   background: #fff;
   color: var(--text);
+}
+
+input::placeholder {
+  color: #758178;
+  font-size: 13px;
 }
 
 button,
@@ -688,6 +701,10 @@ summary {
   form,
   .filters {
     grid-template-columns: 1fr;
+  }
+
+  .forecast-panel {
+    grid-column: auto;
   }
 
   .recommendation-main {
