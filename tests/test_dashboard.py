@@ -150,3 +150,41 @@ def test_analytics_category_input_is_empty_with_product_suggestions(monkeypatch)
     assert 'value="Роза"' not in response.text
     assert '<option value="Роза Эквадор 50"></option>' in response.text
     assert '<option value="Роза общ"></option>' in response.text
+
+
+def test_backtest_category_input_is_empty_with_product_suggestions(monkeypatch):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    product = Product(onec_id="rose", purchase_name="Роза Эквадор 50", sales_category="Роза", flower_type="rose")
+    session.add(product)
+    session.flush()
+    session.add(Sale(sale_date=date(2026, 6, 1), product_id=product.id, quantity=10, revenue=1000, source_row_hash="sale"))
+    session.commit()
+    monkeypatch.setenv("MVP_PRODUCT_CATEGORY", "Роза")
+    import app.main as main
+
+    main.settings.mvp_product_category = "Роза"
+
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    response = TestClient(app).get("/backtest")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert 'name="category"' in response.text
+    assert 'placeholder="Начните вводить название номенклатуры"' in response.text
+    assert 'value="Роза"' not in response.text
+    assert '<option value="Роза Эквадор 50"></option>' in response.text
+    assert '<option value="Роза общ"></option>' in response.text

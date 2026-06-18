@@ -11,7 +11,18 @@
 <section class="panel wide">
   <form class="filters" action="/backtest" method="get">
     <label>Категория</label>
-    <input type="text" name="category" value="{{ category }}" required>
+    <input
+      type="text"
+      name="category"
+      list="backtest-product-options"
+      placeholder="Начните вводить название номенклатуры"
+      required
+    >
+    <datalist id="backtest-product-options">
+      {% for option in product_options %}
+        <option value="{{ option }}"></option>
+      {% endfor %}
+    </datalist>
     <label>Период с</label>
     <input type="date" name="target_start" value="{{ target_start }}" required>
     <label>по</label>

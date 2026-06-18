@@ -344,11 +344,12 @@ def analytics(
 @app.get("/backtest", response_class=HTMLResponse)
 def backtest(
     request: Request,
-    category: str = settings.mvp_product_category,
+    category: str = "",
     target_start: date | None = None,
     target_end: date | None = None,
     db: Session = Depends(get_db),
 ):
+    category = category.strip() or settings.mvp_product_category
     latest_actual_sale_date = db.scalar(
         select(func.max(Sale.sale_date))
         .join(Product, Product.id == Sale.product_id)
@@ -371,6 +372,7 @@ def backtest(
             "target_start": target_start,
             "target_end": target_end,
             "result": result,
+            "product_options": _product_options(db),
         },
     )
 
