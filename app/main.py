@@ -49,6 +49,26 @@ def _default_forecast_period(today: date | None = None) -> tuple[date, date]:
     return start, end
 
 
+def _product_options(db: Session) -> list[str]:
+    has_product_data = or_(
+        exists(select(Sale.id).where(Sale.product_id == Product.id)),
+        exists(select(Stock.id).where(Stock.product_id == Product.id)),
+        exists(select(PurchaseOrder.id).where(PurchaseOrder.product_id == Product.id)),
+    )
+    categories = set(db.scalars(select(Product.sales_category).where(Product.active.is_(True))))
+    return sorted(
+        {f"{category} общ" for category in categories if category}
+        | set(
+            db.scalars(
+                select(Product.purchase_name).where(
+                    Product.active.is_(True),
+                    has_product_data,
+                )
+            )
+        )
+    )
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -95,18 +115,6 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         )
     purchases_quantity = db.scalar(select(func.coalesce(func.sum(PurchaseOrder.quantity_ordered), 0))) or 0
     latest_run = db.scalar(select(RecommendationRun).order_by(desc(RecommendationRun.created_at)).limit(1))
-    categories = set(db.scalars(select(Product.sales_category).where(Product.active.is_(True))))
-    product_options = sorted(
-        {f"{category} общ" for category in categories if category}
-        | set(
-            db.scalars(
-                select(Product.purchase_name).where(
-                    Product.active.is_(True),
-                    has_product_data,
-                )
-            )
-        )
-    )
     default_start, default_end = _default_forecast_period()
     return templates.TemplateResponse(
         "dashboard.html",
@@ -123,7 +131,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "stocks_quantity": stocks_quantity,
             "purchases_quantity": purchases_quantity,
             "latest_run": latest_run,
-            "product_options": product_options,
+            "product_options": _product_options(db),
             "default_start": default_start,
             "default_end": default_end,
             "sync_status": request.query_params.get("sync_status", ""),
@@ -306,11 +314,12 @@ def show_run(run_id: int, request: Request, db: Session = Depends(get_db)):
 @app.get("/analytics", response_class=HTMLResponse)
 def analytics(
     request: Request,
-    category: str = settings.mvp_product_category,
+    category: str = "",
     start: date | None = None,
     end: date | None = None,
     db: Session = Depends(get_db),
 ):
+    category = category.strip() or settings.mvp_product_category
     default_end = date.today()
     default_start = default_end - timedelta(days=90)
     start = start or default_start
@@ -327,6 +336,7 @@ def analytics(
             "analytics": data,
             "analytics_json": json.dumps(data, ensure_ascii=False),
             "summary": data["summary"],
+            "product_options": _product_options(db),
         },
     )
 

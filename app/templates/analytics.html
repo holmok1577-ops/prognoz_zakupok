@@ -11,7 +11,18 @@
 <section class="panel wide">
   <form class="filters" action="/analytics" method="get">
     <label>Категория</label>
-    <input type="text" name="category" value="{{ category }}" required>
+    <input
+      type="text"
+      name="category"
+      list="analytics-product-options"
+      placeholder="Начните вводить название номенклатуры"
+      required
+    >
+    <datalist id="analytics-product-options">
+      {% for option in product_options %}
+        <option value="{{ option }}"></option>
+      {% endfor %}
+    </datalist>
     <label>С</label>
     <input type="date" name="start" value="{{ start }}" required>
     <label>По</label>
