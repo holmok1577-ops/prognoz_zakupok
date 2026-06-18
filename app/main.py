@@ -69,6 +69,19 @@ def _product_options(db: Session) -> list[str]:
     )
 
 
+def _default_product_query(db: Session) -> str:
+    configured = " ".join((settings.mvp_product_category or "").split())
+    if not configured:
+        return ""
+    options = set(_product_options(db))
+    if configured in options:
+        return configured
+    common_candidate = f"{configured} общ"
+    if common_candidate in options:
+        return common_candidate
+    return configured
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -116,6 +129,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     purchases_quantity = db.scalar(select(func.coalesce(func.sum(PurchaseOrder.quantity_ordered), 0))) or 0
     latest_run = db.scalar(select(RecommendationRun).order_by(desc(RecommendationRun.created_at)).limit(1))
     default_start, default_end = _default_forecast_period()
+    default_product_query = _default_product_query(db)
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -132,6 +146,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "purchases_quantity": purchases_quantity,
             "latest_run": latest_run,
             "product_options": _product_options(db),
+            "default_product_query": default_product_query,
             "default_start": default_start,
             "default_end": default_end,
             "sync_status": request.query_params.get("sync_status", ""),
@@ -319,7 +334,7 @@ def analytics(
     end: date | None = None,
     db: Session = Depends(get_db),
 ):
-    category = category.strip() or settings.mvp_product_category
+    category = category.strip() or _default_product_query(db)
     default_end = date.today()
     default_start = default_end - timedelta(days=90)
     start = start or default_start
@@ -349,12 +364,12 @@ def backtest(
     target_end: date | None = None,
     db: Session = Depends(get_db),
 ):
-    category = category.strip() or settings.mvp_product_category
+    category = category.strip() or _default_product_query(db)
+    products = _products_for_query(db, category)
+    product_ids = [product.id for product in products]
     latest_actual_sale_date = db.scalar(
-        select(func.max(Sale.sale_date))
-        .join(Product, Product.id == Sale.product_id)
-        .where(
-            Product.sales_category == category,
+        select(func.max(Sale.sale_date)).where(
+            Sale.product_id.in_(product_ids) if product_ids else False,
             Sale.sale_date <= date.today(),
         )
     )

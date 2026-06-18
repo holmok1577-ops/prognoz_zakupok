@@ -112,6 +112,8 @@ def test_dashboard_counts_all_products_with_data_and_keeps_forecast_input_empty(
     assert 'placeholder="Начните вводить название номенклатуры"' in response.text
     assert 'value="Роза"' not in response.text
     assert "Импорт CSV" not in response.text
+    assert "/analytics?category=Роза общ" in response.text
+    assert "/backtest?category=Роза общ" in response.text
 
 
 def test_analytics_category_input_is_empty_with_product_suggestions(monkeypatch):
@@ -145,6 +147,8 @@ def test_analytics_category_input_is_empty_with_product_suggestions(monkeypatch)
     app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert "Аналитика продаж" in response.text
+    assert "Роза общ за" in response.text
     assert 'name="category"' in response.text
     assert 'placeholder="Начните вводить название номенклатуры"' in response.text
     assert 'value="Роза"' not in response.text
@@ -183,6 +187,8 @@ def test_backtest_category_input_is_empty_with_product_suggestions(monkeypatch):
     app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert "Проверка на истории" in response.text
+    assert "Роза общ за" in response.text
     assert 'name="category"' in response.text
     assert 'placeholder="Начните вводить название номенклатуры"' in response.text
     assert 'value="Роза"' not in response.text
