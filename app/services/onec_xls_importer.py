@@ -12,6 +12,32 @@ from app.services.importer import (
     import_stocks_rows,
 )
 
+ROSE_NAME_MARKERS = (
+    "наоми",
+    "бомбастик",
+    "джовита",
+    "джумилия",
+    "илиос",
+    "кендал",
+    "кимберли",
+    "лавендер",
+    "лондон ай",
+    "манд алла",
+    "мансфилд",
+    "мисти баблс",
+    "присцилла",
+    "ред наоми",
+    "ревайл",
+    "ревайвал",
+    "реджентс",
+    "роял парк",
+    "сен тропе",
+    "эксплорер",
+    "эльторо",
+    "эспания",
+    "шифон",
+)
+
 
 def import_onec_products_xls(db: Session, file: BinaryIO) -> int:
     sheet = _first_sheet(file)
@@ -397,6 +423,8 @@ def _sales_category_for_name(name: str) -> str:
         return "Гвоздика"
     if "роза" in lowered:
         return "Роза"
+    if any(marker in lowered for marker in ROSE_NAME_MARKERS):
+        return "Роза"
     if "хризантем" in lowered:
         return "Хризантема"
     return name
@@ -407,6 +435,8 @@ def _flower_type_for_name(name: str, product_type: str = "") -> str:
     if "гвоздик" in lowered:
         return "carnation"
     if "роза" in lowered:
+        return "rose"
+    if any(marker in lowered for marker in ROSE_NAME_MARKERS):
         return "rose"
     if "хризантем" in lowered:
         return "chrysanthemum"

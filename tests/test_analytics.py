@@ -7,7 +7,7 @@ from app.db import Base
 from app.models import Product, Sale, Stock, Store
 from app.services.importer import _as_date
 from app.services.analytics import build_analytics_data, build_backtest
-from app.services.onec_xls_importer import _sales_store_layout
+from app.services.onec_xls_importer import _sales_category_for_name, _sales_store_layout
 
 
 class FakeSheet:
@@ -88,6 +88,11 @@ def test_sales_store_layout_treats_first_flower_column_as_total_and_next_columns
     )
 
     assert _sales_store_layout(sheet, 0) == ("Гвоздика", [(4, "Магазин 1"), (5, "Магазин 2")])
+
+
+def test_rose_variety_without_rose_word_is_classified_as_rose():
+    assert _sales_category_for_name("Вайт наоми 50") == "Роза"
+    assert _sales_category_for_name("Мадам Бомбастик куст. 50") == "Роза"
 
 
 def test_analytics_does_not_include_store_sales_without_store_source_data():
