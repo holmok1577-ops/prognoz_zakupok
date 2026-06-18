@@ -43,6 +43,12 @@ templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
+def _default_forecast_period(today: date | None = None) -> tuple[date, date]:
+    start = today or date.today()
+    end = start + timedelta(days=settings.forecast_period_days - 1)
+    return start, end
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -93,8 +99,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         )
         | categories
     )
-    default_start = date.today() + timedelta(days=settings.forecast_lead_days)
-    default_end = default_start + timedelta(days=settings.forecast_period_days - 1)
+    default_start, default_end = _default_forecast_period()
     return templates.TemplateResponse(
         "dashboard.html",
         {
