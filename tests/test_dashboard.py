@@ -1,4 +1,6 @@
 from datetime import date
+from pathlib import Path
+from urllib.parse import unquote_plus
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -194,3 +196,111 @@ def test_backtest_category_input_is_empty_with_product_suggestions(monkeypatch):
     assert 'value="Роза"' not in response.text
     assert '<option value="Роза Эквадор 50"></option>' in response.text
     assert '<option value="Роза общ"></option>' in response.text
+
+
+def test_admin_auth_redirects_to_login_and_allows_login(monkeypatch):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine)
+
+    import app.main as main
+    import app.services.admin as admin
+
+    backup_dir = Path(".tmp/test-admin-backups")
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(main, "SessionLocal", Session)
+    monkeypatch.setattr(main.settings, "admin_auth_enabled", True)
+    monkeypatch.setattr(main.settings, "admin_username", "admin")
+    monkeypatch.setattr(main.settings, "admin_initial_password", "secret123")
+    monkeypatch.setattr(main.settings, "admin_backup_dir", str(backup_dir))
+    monkeypatch.setattr(admin.settings, "admin_auth_enabled", True)
+    monkeypatch.setattr(admin.settings, "admin_username", "admin")
+    monkeypatch.setattr(admin.settings, "admin_initial_password", "secret123")
+    monkeypatch.setattr(admin.settings, "admin_backup_dir", str(backup_dir))
+
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    client = TestClient(app)
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/login")
+
+    response = client.post(
+        "/login",
+        data={"username": "admin", "password": "secret123", "next": "/"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "flower_admin_session" in response.headers.get("set-cookie", "")
+
+    response = client.get("/")
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Админка" in response.text
+    assert "Выйти" in response.text
+    assert "return confirm('Вы уверены, что хотите очистить базу данных?" in response.text
+
+
+def test_admin_change_password_requires_repeated_password(monkeypatch):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine)
+
+    import app.main as main
+    import app.services.admin as admin
+
+    backup_dir = Path(".tmp/test-admin-backups")
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(main, "SessionLocal", Session)
+    monkeypatch.setattr(main.settings, "admin_auth_enabled", True)
+    monkeypatch.setattr(main.settings, "admin_username", "admin")
+    monkeypatch.setattr(main.settings, "admin_initial_password", "secret123")
+    monkeypatch.setattr(main.settings, "admin_backup_dir", str(backup_dir))
+    monkeypatch.setattr(admin.settings, "admin_auth_enabled", True)
+    monkeypatch.setattr(admin.settings, "admin_username", "admin")
+    monkeypatch.setattr(admin.settings, "admin_initial_password", "secret123")
+    monkeypatch.setattr(admin.settings, "admin_backup_dir", str(backup_dir))
+
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    client = TestClient(app)
+    client.post(
+        "/login",
+        data={"username": "admin", "password": "secret123", "next": "/admin"},
+        follow_redirects=False,
+    )
+    response = client.post(
+        "/admin/change-password",
+        data={
+            "current_password": "secret123",
+            "new_password": "newsecret123",
+            "repeated_password": "newsecret124",
+        },
+        follow_redirects=False,
+    )
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 303
+    assert "Новый пароль и повтор пароля не совпадают" in unquote_plus(response.headers["location"])

@@ -33,9 +33,15 @@ def get_db():
 
 def init_db() -> None:
     from app import models  # noqa: F401
+    from app.services.admin import ensure_default_admin
 
     Base.metadata.create_all(bind=engine)
     _apply_lightweight_migrations()
+    db = SessionLocal()
+    try:
+        ensure_default_admin(db)
+    finally:
+        db.close()
 
 
 def _apply_lightweight_migrations() -> None:

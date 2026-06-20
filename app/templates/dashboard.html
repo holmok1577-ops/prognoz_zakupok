@@ -108,7 +108,12 @@
     {% if latest_run %}
       <a class="last-run" href="/runs/{{ latest_run.id }}">Последний расчет: {{ latest_run.created_at.strftime("%d.%m.%Y %H:%M") }}</a>
     {% endif %}
-    <form class="single-action danger-action" action="/admin/reset-data" method="post">
+    <form
+      class="single-action danger-action"
+      action="/admin/reset-data"
+      method="post"
+      onsubmit="return confirm('Вы уверены, что хотите очистить базу данных? Будут удалены загруженные данные и прошлые расчеты.');"
+    >
       <button type="submit">Очистить базу</button>
     </form>
     <p class="reset-note">

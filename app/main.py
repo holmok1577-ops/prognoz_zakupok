@@ -2,7 +2,7 @@ import json
 from datetime import date, timedelta
 from urllib.parse import urlencode
 
-from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -10,9 +10,22 @@ from sqlalchemy import desc, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db import get_db, init_db
+from app.db import SessionLocal, get_db, init_db
 from app.models import Product, PurchaseOrder, RecommendationItem, RecommendationRun, Sale, Stock, Store
 from app.services.ai import build_ai_recommendation, build_primary_ai_recommendation
+from app.services.admin import (
+    SESSION_COOKIE,
+    audit_log,
+    authenticate_admin,
+    change_password,
+    create_backup,
+    create_session,
+    delete_session,
+    get_user_by_session_token,
+    list_backups,
+    log_action,
+    restore_backup,
+)
 from app.services.analytics import build_analytics_data, build_backtest
 from app.services.forecast import (
     build_statistical_forecast,
@@ -90,6 +103,131 @@ def on_startup() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.middleware("http")
+async def admin_auth_middleware(request: Request, call_next):
+    if not settings.admin_auth_enabled:
+        request.state.admin_user = None
+        return await call_next(request)
+    path = request.url.path
+    if path == "/health" or path.startswith("/static/") or path in {"/login", "/logout"}:
+        request.state.admin_user = None
+        return await call_next(request)
+    db = SessionLocal()
+    try:
+        user = get_user_by_session_token(db, request.cookies.get(SESSION_COOKIE))
+        request.state.admin_user = user
+        if not user:
+            next_url = str(request.url.path)
+            if request.url.query:
+                next_url += f"?{request.url.query}"
+            return RedirectResponse(url=f"/login?{urlencode({'next': next_url})}", status_code=303)
+    finally:
+        db.close()
+    return await call_next(request)
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/", error: str = ""):
+    if not settings.admin_auth_enabled:
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "settings": settings,
+            "next": next,
+            "error": error,
+        },
+    )
+
+
+@app.post("/login")
+def login(
+    response: Response,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+    db: Session = Depends(get_db),
+):
+    user = authenticate_admin(db, username, password)
+    if not user:
+        return RedirectResponse(url=f"/login?{urlencode({'next': next, 'error': 'Неверный логин или пароль.'})}", status_code=303)
+    token = create_session(db, user)
+    redirect = RedirectResponse(url=next or "/", status_code=303)
+    redirect.set_cookie(
+        SESSION_COOKIE,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.app_env == "production",
+        max_age=settings.admin_session_days * 24 * 60 * 60,
+    )
+    return redirect
+
+
+@app.get("/logout")
+def logout(request: Request, db: Session = Depends(get_db)):
+    delete_session(db, request.cookies.get(SESSION_COOKIE))
+    redirect = RedirectResponse(url="/login", status_code=303)
+    redirect.delete_cookie(SESSION_COOKIE)
+    return redirect
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page(request: Request, db: Session = Depends(get_db), status: str = "", message: str = ""):
+    return templates.TemplateResponse(
+        "admin.html",
+        {
+            "request": request,
+            "settings": settings,
+            "status": status,
+            "message": message,
+            "backups": list_backups(),
+            "audit_log": audit_log(db),
+        },
+    )
+
+
+@app.post("/admin/change-password")
+def admin_change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    repeated_password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = request.state.admin_user
+    ok, message = change_password(db, user, current_password, new_password, repeated_password)
+    redirect = RedirectResponse(
+        url=f"/admin?{urlencode({'status': 'ok' if ok else 'error', 'message': message})}",
+        status_code=303,
+    )
+    if ok:
+        redirect.delete_cookie(SESSION_COOKIE)
+    return redirect
+
+
+@app.post("/admin/backup")
+def admin_create_backup(request: Request, db: Session = Depends(get_db)):
+    try:
+        path = create_backup(username=request.state.admin_user.username)
+        log_action(db, request.state.admin_user.username, "manual_backup", path.name)
+        query = {"status": "ok", "message": f"Backup создан: {path.name}"}
+    except Exception as exc:
+        query = {"status": "error", "message": f"Не удалось создать backup: {exc}"}
+    return RedirectResponse(url=f"/admin?{urlencode(query)}", status_code=303)
+
+
+@app.post("/admin/restore")
+def admin_restore_backup(request: Request, backup_name: str = Form(...), db: Session = Depends(get_db)):
+    try:
+        restore_backup(db, request.state.admin_user.username, backup_name)
+        query = {"status": "ok", "message": f"База восстановлена из backup: {backup_name}"}
+    except Exception as exc:
+        query = {"status": "error", "message": f"Не удалось восстановить backup: {exc}"}
+    return RedirectResponse(url=f"/admin?{urlencode(query)}", status_code=303)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -222,7 +360,7 @@ async def import_onec_xls(kind: str, file: UploadFile = File(...), db: Session =
 
 
 @app.post("/admin/reset-data")
-def reset_data(db: Session = Depends(get_db)):
+def reset_data(request: Request, db: Session = Depends(get_db)):
     db.query(RecommendationItem).delete()
     db.query(RecommendationRun).delete()
     db.query(PurchaseOrder).delete()
@@ -230,6 +368,8 @@ def reset_data(db: Session = Depends(get_db)):
     db.query(Sale).delete()
     db.query(Product).delete()
     db.query(Store).delete()
+    username = request.state.admin_user.username if getattr(request.state, "admin_user", None) else "admin"
+    log_action(db, username, "reset_data", "База очищена через интерфейс.")
     db.commit()
     query = urlencode({"import_status": "ok", "import_message": "База очищена. Можно загружать реальные данные из 1С."})
     return RedirectResponse(url=f"/?{query}", status_code=303)

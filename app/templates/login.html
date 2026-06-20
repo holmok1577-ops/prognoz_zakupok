@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="auth-panel">
+  <div class="panel">
+    <h1>Вход</h1>
+    <p class="panel-note">Введите логин и пароль администратора, чтобы открыть пилотную версию.</p>
+    {% if error %}
+      <section class="notice error">{{ error }}</section>
+    {% endif %}
+    <form action="/login" method="post" class="auth-form">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label>Логин</label>
+      <input type="text" name="username" autocomplete="username" required autofocus>
+      <label>Пароль</label>
+      <input type="password" name="password" autocomplete="current-password" required>
+      <button class="primary">Войти</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

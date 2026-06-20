@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     carnation_shelf_life_days: int = 14
     chrysanthemum_shelf_life_days: int = 14
 
+    admin_auth_enabled: bool = False
+    admin_username: str = "admin"
+    admin_initial_password: str = ""
+    admin_session_days: int = 7
+    admin_backup_dir: str = "./data/backups"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero compact">
+  <div>
+    <h1>Админка</h1>
+    <p>Смена пароля, backup базы и восстановление данных.</p>
+  </div>
+  <a class="button" href="/">На главную</a>
+</section>
+
+{% if message %}
+<section class="notice {{ status }}">
+  {{ message }}
+</section>
+{% endif %}
+
+<section class="admin-grid">
+  <div class="panel">
+    <h2>Смена пароля</h2>
+    <form action="/admin/change-password" method="post">
+      <label>Текущий пароль</label>
+      <input type="password" name="current_password" autocomplete="current-password" required>
+      <label>Новый пароль</label>
+      <input type="password" name="new_password" autocomplete="new-password" minlength="8" required>
+      <label>Повторите новый пароль</label>
+      <input type="password" name="repeated_password" autocomplete="new-password" minlength="8" required>
+      <button class="primary">Изменить пароль</button>
+    </form>
+    <p class="form-hint">После смены пароля текущая сессия завершится, нужно будет войти заново.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Backup базы</h2>
+    <form class="single-action" action="/admin/backup" method="post">
+      <button class="primary">Создать backup сейчас</button>
+    </form>
+    <p class="form-hint">Автоматические backup-и создаются ежедневно. Ручной backup появится в списке ниже.</p>
+  </div>
+</section>
+
+<section class="panel wide">
+  <h2>Восстановление из backup</h2>
+  {% if backups %}
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Файл</th>
+            <th>Размер</th>
+            <th>Дата</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for backup in backups %}
+          <tr>
+            <td>{{ backup.name }}</td>
+            <td>{{ "%.1f"|format(backup.size / 1024 / 1024) }} МБ</td>
+            <td>{{ backup.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
+            <td>
+              <form
+                class="inline-form"
+                action="/admin/restore"
+                method="post"
+                onsubmit="return confirm('Восстановить базу из backup {{ backup.name }}? Текущее состояние будет заменено. Перед восстановлением система создаст свежий backup.');"
+              >
+                <input type="hidden" name="backup_name" value="{{ backup.name }}">
+                <button>Восстановить</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="panel-note">Backup-файлы пока не найдены.</p>
+  {% endif %}
+</section>
+
+<section class="panel wide">
+  <h2>Журнал действий</h2>
+  {% if audit_log %}
+    <div class="table-wrap">
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Дата</th>
+            <th>Пользователь</th>
+            <th>Действие</th>
+            <th>Детали</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in audit_log %}
+          <tr>
+            <td>{{ row.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
+            <td>{{ row.username }}</td>
+            <td>{{ row.action }}</td>
+            <td>{{ row.details }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="panel-note">Журнал пока пуст.</p>
+  {% endif %}
+</section>
+{% endblock %}

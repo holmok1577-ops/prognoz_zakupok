@@ -9,6 +9,9 @@ services:
       - "127.0.0.1:8001:8000"
     volumes:
       - ./data:/app/data
+      - /opt/backups/prognoz_zakupok:/app/backups
+    environment:
+      ADMIN_BACKUP_DIR: /app/backups
     restart: unless-stopped
     mem_limit: 768m
     memswap_limit: 1024m
